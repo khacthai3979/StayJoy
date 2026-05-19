@@ -178,9 +178,11 @@ interface DBConfig {
 
 /**
  * Reads LLM config from the llm_settings table (service role, bypasses RLS).
- * Returns null if no active config found or if env vars are missing.
+ * Priority: property-specific config → global config → null
+ *
+ * @param propertyId - If provided, looks for property-specific config first
  */
-async function getConfigFromDB(): Promise<DBConfig | null> {
+async function getConfigFromDB(propertyId?: string): Promise<DBConfig | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -188,10 +190,34 @@ async function getConfigFromDB(): Promise<DBConfig | null> {
 
   try {
     const serviceClient = createServiceClient(url, serviceKey)
+
+    // If propertyId provided, try property-specific config first
+    if (propertyId) {
+      const { data: propertyConfig } = await serviceClient
+        .from('llm_settings')
+        .select('provider, model, api_key, fallback_provider, fallback_model, fallback_api_key')
+        .eq('is_active', true)
+        .eq('property_id', propertyId)
+        .single()
+
+      if (propertyConfig) {
+        return {
+          provider: propertyConfig.provider,
+          model: propertyConfig.model,
+          apiKey: propertyConfig.api_key,
+          fallbackProvider: propertyConfig.fallback_provider,
+          fallbackModel: propertyConfig.fallback_model,
+          fallbackApiKey: propertyConfig.fallback_api_key,
+        }
+      }
+    }
+
+    // Fallback to global config (property_id IS NULL)
     const { data, error } = await serviceClient
       .from('llm_settings')
       .select('provider, model, api_key, fallback_provider, fallback_model, fallback_api_key')
       .eq('is_active', true)
+      .is('property_id', null)
       .single()
 
     if (error || !data) return null
@@ -216,14 +242,18 @@ async function getConfigFromDB(): Promise<DBConfig | null> {
  * Calls the configured LLM with fallback support.
  *
  * Priority for config:
- * 1. Database (llm_settings table) — admin UI changes take effect immediately
- * 2. Environment variables (fallback if DB config not found)
+ * 1. Database — property-specific config (if propertyId provided)
+ * 2. Database — global config (property_id IS NULL)
+ * 3. Environment variables (fallback if DB config not found)
  *
  * Provider chain: primary → fallback → others with keys
+ *
+ * @param req - The LLM request (system + user message)
+ * @param propertyId - Optional property ID for per-property LLM config
  */
-export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
-  // Try DB config first
-  const dbConfig = await getConfigFromDB()
+export async function callLLM(req: LLMRequest, propertyId?: string): Promise<LLMResponse> {
+  // Try DB config first (property-specific → global)
+  const dbConfig = await getConfigFromDB(propertyId)
 
   if (dbConfig) {
     // Use DB-based config

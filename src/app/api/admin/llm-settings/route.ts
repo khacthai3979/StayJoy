@@ -24,7 +24,8 @@ async function getAdminUser(supabase: ReturnType<typeof createClient>) {
 }
 
 // GET /api/admin/llm-settings — returns current active LLM settings (masked keys)
-export async function GET() {
+// Supports ?property_id=xxx for per-property config
+export async function GET(request: NextRequest) {
   const supabase = createClient()
 
   const user = await getAdminUser(supabase)
@@ -32,17 +33,27 @@ export async function GET() {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const { searchParams } = new URL(request.url)
+  const propertyId = searchParams.get('property_id')
+
   // Use service client to bypass RLS for reading settings
   const serviceClient = createServiceClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const { data, error } = await serviceClient
+  let query = serviceClient
     .from('llm_settings')
     .select('*')
     .eq('is_active', true)
-    .single()
+
+  if (propertyId) {
+    query = query.eq('property_id', propertyId)
+  } else {
+    query = query.is('property_id', null)
+  }
+
+  const { data, error } = await query.single()
 
   if (error && error.code !== 'PGRST116') {
     // PGRST116 = no rows found, which is fine
@@ -64,12 +75,13 @@ export async function GET() {
       fallback_model: data.fallback_model,
       fallback_api_key_masked: maskApiKey(data.fallback_api_key),
       is_active: data.is_active,
+      property_id: data.property_id,
       updated_at: data.updated_at,
     },
   })
 }
 
-// PUT /api/admin/llm-settings — upsert LLM settings
+// PUT /api/admin/llm-settings — upsert LLM settings (supports property_id)
 export async function PUT(request: NextRequest) {
   const supabase = createClient()
 
@@ -85,6 +97,7 @@ export async function PUT(request: NextRequest) {
     fallback_provider?: string | null
     fallback_model?: string | null
     fallback_api_key?: string | null
+    property_id?: string | null
   }
 
   try {
@@ -93,7 +106,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { provider, model, api_key, fallback_provider, fallback_model, fallback_api_key } = body
+  const { provider, model, api_key, fallback_provider, fallback_model, fallback_api_key, property_id } = body
 
   if (!provider || !model || !api_key) {
     return NextResponse.json(
@@ -116,23 +129,39 @@ export async function PUT(request: NextRequest) {
   )
 
   try {
-    // Check if active settings exist
-    const { data: existing } = await serviceClient
+    // Check if active settings exist for this scope (property or global)
+    let existingQuery = serviceClient
       .from('llm_settings')
-      .select('id')
+      .select('id, api_key, fallback_api_key')
       .eq('is_active', true)
-      .single()
 
-    const settingsData = {
+    if (property_id) {
+      existingQuery = existingQuery.eq('property_id', property_id)
+    } else {
+      existingQuery = existingQuery.is('property_id', null)
+    }
+
+    const { data: existing } = await existingQuery.single()
+
+    // Handle __KEEP_EXISTING__ sentinel for API keys
+    const resolvedApiKey = api_key === '__KEEP_EXISTING__' && existing
+      ? existing.api_key
+      : api_key
+    const resolvedFallbackApiKey = fallback_api_key === '__KEEP_EXISTING__' && existing
+      ? existing.fallback_api_key
+      : (fallback_api_key || null)
+
+    const settingsData: Record<string, unknown> = {
       provider,
       model,
-      api_key,
+      api_key: resolvedApiKey,
       fallback_provider: fallback_provider || null,
       fallback_model: fallback_model || null,
-      fallback_api_key: fallback_api_key || null,
+      fallback_api_key: resolvedFallbackApiKey,
       is_active: true,
       updated_at: new Date().toISOString(),
       updated_by: user.id,
+      property_id: property_id || null,
     }
 
     if (existing) {

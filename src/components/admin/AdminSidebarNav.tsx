@@ -8,6 +8,7 @@ const navItems = [
   { href: '/admin', label: 'Tổng Quan' },
   { href: '/admin/properties', label: 'Properties' },
   { href: '/admin/subscriptions', label: 'Subscriptions' },
+  { href: '/admin/channels', label: 'Channels' },
   { href: '/admin/onboard', label: 'Onboard' },
   { href: '/admin/llm-settings', label: 'AI Settings' },
 ]

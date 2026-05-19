@@ -35,8 +35,17 @@ interface TestResult {
   latency_ms: number
 }
 
+interface Property {
+  id: string
+  name: string
+}
+
 export default function LLMSettingsPage() {
   const { toast } = useToast()
+
+  // Property selector
+  const [properties, setProperties] = useState<Property[]>([])
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>('') // '' = global
 
   // Primary
   const [provider, setProvider] = useState('gemini')
@@ -64,33 +73,66 @@ export default function LLMSettingsPage() {
   const [testingFallback, setTestingFallback] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
 
-  // Load current settings
+  // Load properties list
   useEffect(() => {
-    async function loadSettings() {
+    async function loadProperties() {
       try {
-        const res = await fetch('/api/admin/llm-settings')
-        if (!res.ok) throw new Error('Failed to load settings')
-        const data = await res.json()
-
-        if (data.settings) {
-          setProvider(data.settings.provider)
-          setModel(data.settings.model)
-          setMaskedKey(data.settings.api_key_masked)
-          setFallbackProvider(data.settings.fallback_provider || '')
-          setFallbackModel(data.settings.fallback_model || '')
-          setMaskedFallbackKey(data.settings.fallback_api_key_masked)
-          setIsActive(data.settings.is_active)
-          setUpdatedAt(data.settings.updated_at)
+        const res = await fetch('/api/admin/llm-settings/properties')
+        if (res.ok) {
+          const data = await res.json()
+          setProperties(data.properties ?? [])
         }
       } catch (err) {
-        console.error('Failed to load LLM settings:', err)
-        toast({ title: 'Lỗi', description: 'Không thể tải cấu hình AI', variant: 'destructive' })
-      } finally {
-        setLoading(false)
+        console.error('Failed to load properties:', err)
       }
     }
+    loadProperties()
+  }, [])
+
+  // Load settings when property selection changes
+  useEffect(() => {
     loadSettings()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedPropertyId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadSettings() {
+    setLoading(true)
+    try {
+      const url = selectedPropertyId
+        ? `/api/admin/llm-settings?property_id=${selectedPropertyId}`
+        : '/api/admin/llm-settings'
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Failed to load settings')
+      const data = await res.json()
+
+      if (data.settings) {
+        setProvider(data.settings.provider)
+        setModel(data.settings.model)
+        setMaskedKey(data.settings.api_key_masked)
+        setFallbackProvider(data.settings.fallback_provider || '')
+        setFallbackModel(data.settings.fallback_model || '')
+        setMaskedFallbackKey(data.settings.fallback_api_key_masked)
+        setIsActive(data.settings.is_active)
+        setUpdatedAt(data.settings.updated_at)
+      } else {
+        // No config for this scope — reset form
+        setProvider('gemini')
+        setModel('gemini-2.0-flash-lite')
+        setMaskedKey(null)
+        setFallbackProvider('')
+        setFallbackModel('')
+        setMaskedFallbackKey(null)
+        setIsActive(false)
+        setUpdatedAt(null)
+      }
+      setApiKey('')
+      setFallbackApiKey('')
+    } catch (err) {
+      console.error('Failed to load LLM settings:', err)
+      toast({ title: 'Lỗi', description: 'Không thể tải cấu hình AI', variant: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // When provider changes, update model to first suggestion
   function handleProviderChange(value: string) {
@@ -119,6 +161,7 @@ export default function LLMSettingsPage() {
         fallback_provider: fallbackProvider || null,
         fallback_model: fallbackModel || null,
         fallback_api_key: fallbackApiKey || (fallbackProvider ? '__KEEP_EXISTING__' : null),
+        property_id: selectedPropertyId || null,
       }
 
       const res = await fetch('/api/admin/llm-settings', {
@@ -211,6 +254,27 @@ export default function LLMSettingsPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">Cấu Hình AI Model</h1>
         {isActive && <Badge variant="default">Active</Badge>}
+      </div>
+
+      {/* Property Selector */}
+      <div className="rounded-lg border p-4 space-y-2 bg-muted/30">
+        <Label className="font-semibold">Phạm vi cấu hình</Label>
+        <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Global (tất cả property)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Global (mặc định cho tất cả)</SelectItem>
+            {properties.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {selectedPropertyId
+            ? 'Cấu hình riêng cho property này. Nếu không có, sẽ dùng config Global.'
+            : 'Cấu hình mặc định áp dụng cho tất cả property chưa có config riêng.'}
+        </p>
       </div>
 
       {updatedAt && (

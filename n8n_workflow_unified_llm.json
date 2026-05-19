@@ -1,0 +1,145 @@
+{
+  "name": "StayJoy_Unified_LLM_Production",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatwoot-to-n8n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-1456, 208],
+      "id": "42361579-98e1-4313-bdd9-a138585432a8",
+      "name": "Webhook",
+      "webhookId": "f3c6a563-c303-441f-9695-c9d4a18df006"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9e6d1c66-43a3-45ed-b5e6-dfb284adb24d",
+              "leftValue": "={{ $json.body.message_type }}",
+              "rightValue": "incoming",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "7b2d5a84-6b03-4bb7-b0a9-225a1bf99c39",
+              "leftValue": "={{ $json.body.conversation.status }}",
+              "rightValue": "pending",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-1232, 208],
+      "id": "464ba315-e4f0-4359-b770-3e538c6b4265",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.STAYJOY_API_URL || 'http://localhost:3000' }}/api/n8n/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.KNOWLEDGE_BASE_API_KEY || 'stayjoy-kb-secret-2024' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inbox_id\": \"{{ $('Webhook').item.json.body.inbox?.id || $('Webhook').item.json.body.inbox_id || '' }}\",\n  \"message\": \"{{ $('Webhook').item.json.body.content }}\",\n  \"conversation_id\": \"{{ $('Webhook').item.json.body.conversation?.id || '' }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-760, 208],
+      "id": "unified-llm-chat-001",
+      "name": "Call LLM API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst results = allItems.map(item => {\n  const output = item.json.answer ?? '';\n  const firstLine = output.split('\\n')[0].trim();\n\n  let tagsPart = firstLine;\n  let customerMessage = output;\n\n  // Nếu có tag hợp lệ\n  if (firstLine.startsWith('[')) {\n    tagsPart = firstLine;\n    customerMessage = output.split('\\n').slice(1).join('\\n').trim();\n  } else {\n    // fallback\n    tagsPart = '[GENERAL]';\n  }\n\n  const parts = tagsPart.split('|').map(p => p.trim());\n\n  const convId = $('Webhook').first().json.body?.conversation?.id\n              ?? $('Webhook').first().json.body?.id\n              ?? '';\n\n  // Time VN\n  const now = new Date();\n  const vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000);\n  const timestamp = vnTime.toISOString()\n                          .replace('T', ' ')\n                          .replace(/\\.\\d+Z$/, '');\n\n  const tag = parts[0] ?? 'UNKNOWN';\n\n  let check_in = '';\n  let check_out = '';\n  let room_type = '';\n  let room = '';\n  let service_type = '';\n  let detail = '';\n  let name = '';\n  let phone = '';\n  let email = '';\n  let reason = '';\n\n  if (tag === '[BOOK]') {\n    check_in = parts[1] ?? '';\n    check_out = parts[2] ?? '';\n    room_type = parts[3] ?? '';\n  } \n  else if (tag === '[CONFIRM]') {\n    check_in = parts[1] ?? '';\n    check_out = parts[2] ?? '';\n    room_type = parts[3] ?? '';\n    name = parts[4] ?? '';\n    phone = parts[5] ?? '';\n    email = parts[6] ?? '';\n  } \n  else if (tag === '[SERVICE]') {\n    room = parts[1] ?? '';\n    service_type = parts[2] ?? '';\n    detail = parts[3] ?? '';\n  } \n  else if (tag === '[HELP]') {\n    room = parts[1] ?? '';\n    detail = parts[2] ?? '';\n  } \n  else if (tag === '[CANCEL]') {\n    phone = parts[1] ?? '';\n    reason = parts[2] ?? '';\n  } \n  else {\n    detail = parts.slice(1).join(' ');\n  }\n\n  return {\n    json: {\n      timestamp,\n      conversation_id: convId,\n      tag,\n      check_in,\n      check_out,\n      room_type,\n      room,\n      service_type,\n      detail,\n      name,\n      phone,\n      email,\n      reason,\n      status: 'Mới',\n      output,\n      customer_message: customerMessage,\n      property_id: item.json.property_id ?? ''\n    }\n  };\n});\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-192, 192],
+      "id": "1e584a4b-6535-430a-8d5e-76cf516f2930",
+      "name": "Extract_request_customer"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://app.chatwoot.com/api/v1/accounts/156301/conversations/{{ $node[\"Webhook\"].json.body.conversation?.id || $node[\"Webhook\"].json.body.id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "content", "value": "={{ $json.customer_message }}" },
+            { "name": "message_type", "value": "outgoing" },
+            { "name": "private", "value": "false" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [256, -144],
+      "id": "1d062f49-d3aa-4768-8d0f-f087b41a217b",
+      "name": "Reply to Chatwoot",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vAfHDLTjhpWi04IP",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "If", "type": "main", "index": 0 }]]
+    },
+    "If": {
+      "main": [
+        [{ "node": "Call LLM API", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Call LLM API": {
+      "main": [[{ "node": "Extract_request_customer", "type": "main", "index": 0 }]]
+    },
+    "Extract_request_customer": {
+      "main": [[{ "node": "Reply to Chatwoot", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
