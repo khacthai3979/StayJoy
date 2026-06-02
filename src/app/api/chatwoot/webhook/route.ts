@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Build system message from knowledge base
-    const [sectionsResult, roomsResult] = await Promise.all([
+    const [sectionsResult, roomsResult, imagesResult] = await Promise.all([
       supabase
         .from('knowledge_base_sections')
         .select('section_key, title, content, is_active, sort_order')
@@ -219,11 +219,47 @@ export async function POST(request: NextRequest) {
         .from('rooms')
         .select('room_id, loai_phong, suc_chua, gia_dem')
         .eq('property_id', propertyId),
+      supabase
+        .from('room_images')
+        .select('room_id, image_url')
+        .eq('property_id', propertyId)
+        .order('sort_order', { ascending: true }),
     ])
 
     const sections: KnowledgeSection[] = sectionsResult.data ?? []
     const rooms: Room[] = roomsResult.data ?? []
-    const systemMessage = buildSystemMessage(sections, rooms, plan)
+    const roomImages = imagesResult.data ?? []
+
+    // Build system message
+    let systemMessage = buildSystemMessage(sections, rooms, plan)
+
+    // Append image instruction if rooms have images
+    if (roomImages.length > 0) {
+      const imagesByRoom: Record<string, string[]> = {}
+      for (const img of roomImages) {
+        if (!imagesByRoom[img.room_id]) imagesByRoom[img.room_id] = []
+        imagesByRoom[img.room_id].push(img.image_url)
+      }
+
+      const roomsWithImages = Object.keys(imagesByRoom)
+      const imageInstruction = [
+        '\n\n---\n\n## HƯỚNG DẪN GỬI HÌNH PHÒNG (BẮT BUỘC)',
+        '',
+        'Khi khách hàng hỏi xem hình ảnh, ảnh chụp hoặc muốn nhìn phòng, bạn BẮT BUỘC phải trả lời bình thường và thêm chính xác tag [SHOW_IMAGES:room_id] vào cuối câu trả lời.',
+        'Hệ thống sẽ tự động chuyển đổi tag này thành ảnh thực tế gửi cho khách.',
+        `Danh sách phòng có ảnh: ${roomsWithImages.join(', ')}`,
+        '',
+        'BẢN ĐỒ MAPPING PHÒNG (Hãy đối chiếu kỹ):',
+        ...rooms.filter(r => roomsWithImages.includes(r.room_id)).map(r => `  - Phòng ID "${r.room_id}" hoặc loại phòng "${r.loai_phong}" -> Dùng tag: [SHOW_IMAGES:${r.room_id}]`),
+        '',
+        'LƯU Ý CÚ PHÁP:',
+        '- Ví dụ: "Dạ, em gửi anh/chị xem ảnh của phòng Superior Giường Đôi (P101) ạ! [SHOW_IMAGES:P101]"',
+        '- Nếu khách muốn xem hình tất cả các phòng hoặc nhiều phòng cùng lúc, hãy đính kèm nhiều tag: [SHOW_IMAGES:P101] [SHOW_IMAGES:P102]',
+        '- Không sử dụng tag cho những phòng không có trong danh sách trên.',
+      ].join('\n')
+
+      systemMessage += imageInstruction
+    }
 
     // Call LLM
     const llmResponse = await callLLM(
@@ -232,9 +268,35 @@ export async function POST(request: NextRequest) {
       plan
     )
 
+    // Scan for [SHOW_IMAGES:room_id] tags
+    const imageTags = llmResponse.answer.match(/\[SHOW_IMAGES:[^\]]+\]/g) || []
+
     // Reply to Chatwoot (strip tag before sending to customer)
-    const cleanAnswer = llmResponse.answer.replace(/\[BOOKING_REQUEST\|[^\]]*\]/g, '').trim()
+    const cleanAnswer = llmResponse.answer
+      .replace(/\[BOOKING_REQUEST\|[^\]]*\]/g, '')
+      .replace(/\[SHOW_IMAGES:[^\]]+\]/g, '')
+      .trim()
     await replyToChatwoot(accountId, conversationId, cleanAnswer)
+
+    // Handle image sending if tags were emitted
+    if (imageTags.length > 0 && roomImages.length > 0) {
+      const imagesByRoom: Record<string, string[]> = {}
+      for (const img of roomImages) {
+        if (!imagesByRoom[img.room_id]) imagesByRoom[img.room_id] = []
+        imagesByRoom[img.room_id].push(img.image_url)
+      }
+
+      for (const tag of imageTags) {
+        const match = tag.match(/\[SHOW_IMAGES:([^\]]+)\]/)
+        if (match) {
+          const roomId = match[1].trim()
+          const urls = imagesByRoom[roomId] || []
+          for (const url of urls) {
+            await replyToChatwoot(accountId, conversationId, url)
+          }
+        }
+      }
+    }
 
     // Check if AI detected a booking request (tag in response)
     const bookingMatch = llmResponse.answer.match(/\[BOOKING_REQUEST\|([^\]]+)\]/)
