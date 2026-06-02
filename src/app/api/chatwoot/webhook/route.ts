@@ -76,6 +76,49 @@ async function replyToChatwoot(
   }
 }
 
+async function sendImageToChatwoot(
+  accountId: number,
+  conversationId: number,
+  imageUrl: string,
+  messageType: 'outgoing' | 'private' = 'outgoing'
+) {
+  const chatwootUrl = process.env.CHATWOOT_URL || 'http://chatwoot-web:3000'
+  const chatwootToken = process.env.CHATWOOT_BOT_TOKEN
+
+  if (!chatwootToken) {
+    console.error('[Chatwoot Webhook] CHATWOOT_BOT_TOKEN not configured')
+    return
+  }
+
+  try {
+    const imageRes = await fetch(imageUrl)
+    if (!imageRes.ok) {
+      throw new Error(`Failed to fetch image from URL: ${imageUrl}, status: ${imageRes.status}`)
+    }
+    const blob = await imageRes.blob()
+
+    const formData = new FormData()
+    formData.append('attachments[]', blob, 'room_image.jpg')
+    formData.append('message_type', 'outgoing')
+    formData.append('private', String(messageType === 'private'))
+
+    const url = `${chatwootUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'api_access_token': chatwootToken,
+      },
+      body: formData,
+    })
+
+    if (!res.ok) {
+      console.error('[Chatwoot Webhook] Failed to send image to Chatwoot:', res.status, await res.text())
+    }
+  } catch (err) {
+    console.error('[Chatwoot Webhook] Error in sendImageToChatwoot:', err)
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const payload: ChatwootWebhookPayload = await request.json()
@@ -292,7 +335,7 @@ export async function POST(request: NextRequest) {
           const roomId = match[1].trim()
           const urls = imagesByRoom[roomId] || []
           for (const url of urls) {
-            await replyToChatwoot(accountId, conversationId, url)
+            await sendImageToChatwoot(accountId, conversationId, url)
           }
         }
       }
