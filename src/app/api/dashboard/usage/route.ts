@@ -13,6 +13,8 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  console.log(`[GET /api/dashboard/usage] User email: ${session.user.email}, user ID: ${session.user.id}`)
+
   try {
     // 1. Get the property linked to the current user
     const { data: propertyData, error: propError } = await supabase
@@ -22,10 +24,12 @@ export async function GET() {
       .single()
 
     if (propError || !propertyData) {
+      console.error(`[GET /api/dashboard/usage] Property not found for user ${session.user.id}:`, propError)
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
     const propertyId = propertyData.property_id
+    console.log(`[GET /api/dashboard/usage] Linked property ID: ${propertyId}`)
 
     // 2. Check current quota and plan limits
     const now = new Date()
@@ -44,6 +48,8 @@ export async function GET() {
         .eq('year_month', currentYearMonth)
         .maybeSingle()
     ])
+
+    console.log(`[GET /api/dashboard/usage] propertyRes data:`, propertyRes.data, `error:`, propertyRes.error)
 
     const plan = propertyRes.data?.plan?.toLowerCase() || 'trial'
     const isExpired = propertyRes.data?.expires_at ? new Date(propertyRes.data.expires_at) < now : false
