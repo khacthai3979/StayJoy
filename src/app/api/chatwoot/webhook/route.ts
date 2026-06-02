@@ -65,8 +65,8 @@ async function replyToChatwoot(
     },
     body: JSON.stringify({
       content: message,
-      message_type: messageType,
-      private: messageType === 'private',
+      message_type: 'outgoing', // Chatwoot expects 'outgoing' for message_type
+      private: messageType === 'private', // Controls whether it's a private note
     }),
   })
 
@@ -119,19 +119,35 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
-    // Lookup property_id from inbox_id
-    const { data: mapping } = await supabase
-      .from('chatwoot_inbox_mapping')
-      .select('property_id')
+    // 1. First, lookup property_id from the active channel_mappings table (configured via Admin UI)
+    const { data: channelMapping } = await supabase
+      .from('channel_mappings')
+      .select('property_id, is_active')
       .eq('inbox_id', String(inboxId))
-      .single()
+      .maybeSingle()
 
-    if (!mapping) {
-      console.error(`[Chatwoot Webhook] No mapping for inbox_id=${inboxId}`)
-      return NextResponse.json({ status: 'error', reason: 'inbox not mapped' }, { status: 404 })
+    let propertyId = ''
+
+    if (channelMapping) {
+      if (!channelMapping.is_active) {
+        console.log(`[Chatwoot Webhook] Channel for inbox_id=${inboxId} is inactive. Ignored.`)
+        return NextResponse.json({ status: 'ignored', reason: 'channel inactive' })
+      }
+      propertyId = channelMapping.property_id
+    } else {
+      // 2. Fallback to legacy chatwoot_inbox_mapping if not found in channel_mappings
+      const { data: legacyMapping } = await supabase
+        .from('chatwoot_inbox_mapping')
+        .select('property_id')
+        .eq('inbox_id', String(inboxId))
+        .maybeSingle()
+
+      if (!legacyMapping) {
+        console.error(`[Chatwoot Webhook] No mapping for inbox_id=${inboxId}`)
+        return NextResponse.json({ status: 'error', reason: 'inbox not mapped' }, { status: 404 })
+      }
+      propertyId = legacyMapping.property_id
     }
-
-    const propertyId = mapping.property_id
 
     // Check Quota and Limits
     const now = new Date()
