@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET() {
   const supabase = createClient()
 
@@ -13,7 +16,7 @@ export async function GET() {
     // Get property linked to the current user via users_properties
     const { data, error } = await supabase
       .from('users_properties')
-      .select('property_id, properties(id, name, address, hotline, description, system_prompt_template)')
+      .select('property_id, properties(id, name, address, hotline, description, system_prompt_template, plan, expires_at)')
       .eq('user_id', session.user.id)
       .single()
 

@@ -1,6 +1,6 @@
 import { SidebarNav } from '@/components/dashboard/SidebarNav'
 import { createClient } from '@/lib/supabase/server'
-import { getExpiryState } from '@/lib/subscription'
+import { getExpiryState, ExpiryState } from '@/lib/subscription'
 import { ExpiryBanner } from '@/components/dashboard/ExpiryBanner'
 
 export default async function TenantLayout({
@@ -9,7 +9,7 @@ export default async function TenantLayout({
   children: React.ReactNode
 }) {
   const supabase = createClient()
-  let expiryState = { shouldShow: false, daysLeft: null, level: null, isTrial: false } as const
+  let expiryState: ExpiryState = { shouldShow: false, daysLeft: null, level: null, isTrial: false }
 
   try {
     const { data: { user } } = await supabase.auth.getUser()
