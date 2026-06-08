@@ -119,7 +119,60 @@ async function sendImageToChatwoot(
   }
 }
 
+async function getConversationHistory(
+
+  accountId: number,
+  conversationId: number
+): Promise<string> {
+  const chatwootUrl = process.env.CHATWOOT_URL || 'http://chatwoot-web:3000'
+  const chatwootToken = process.env.CHATWOOT_BOT_TOKEN
+
+  if (!chatwootToken) {
+    console.error('[Chatwoot Webhook] CHATWOOT_BOT_TOKEN not configured')
+    return ''
+  }
+
+  const url = `${chatwootUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'api_access_token': chatwootToken,
+      },
+    })
+    if (!res.ok) {
+      throw new Error(`Chatwoot API error: ${res.status}`)
+    }
+    const data = await res.json()
+    const messages = data?.payload || []
+    
+    // Filter out private notes and empty/system messages
+    const filtered = messages.filter(
+      (m: any) => !m.private && m.content && (m.message_type === 0 || m.message_type === 1)
+    )
+
+    // Remove the last message if it's from the customer (to prevent duplication with userMessage)
+    if (filtered.length > 0 && filtered[filtered.length - 1].message_type === 0) {
+      filtered.pop()
+    }
+
+    const historySlice = filtered.slice(-15)
+    if (historySlice.length === 0) return ''
+
+    return historySlice
+      .map((m: any) => {
+        const sender = m.message_type === 0 ? 'Khách' : 'Lễ tân AI'
+        return `${sender}: "${m.content}"`
+      })
+      .join('\n')
+  } catch (err) {
+    console.error('[Chatwoot Webhook] Failed to fetch conversation history:', err)
+    return ''
+  }
+}
+
 export async function POST(request: NextRequest) {
+
   try {
     const payload: ChatwootWebhookPayload = await request.json()
 
@@ -275,6 +328,13 @@ export async function POST(request: NextRequest) {
 
     // Build system message
     let systemMessage = buildSystemMessage(sections, rooms, plan)
+
+    // Fetch and append conversation history for context
+    const history = await getConversationHistory(accountId, conversationId)
+    if (history) {
+      systemMessage += `\n\n## LỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY (Để tham khảo ngữ cảnh, theo thứ tự thời gian):\n${history}`
+    }
+
 
     // Append image instruction if rooms have images
     if (roomImages.length > 0) {

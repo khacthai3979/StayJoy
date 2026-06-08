@@ -28,47 +28,114 @@ export async function GET(request: NextRequest) {
 
   if (!userProp) return NextResponse.json({ error: 'No property' }, { status: 403 })
 
-  const { data: mapping } = await supabase
-    .from('chatwoot_inbox_mapping')
+  // 1. Get mapped inbox_ids from active channel_mappings
+  const { data: channels } = await supabase
+    .from('channel_mappings')
     .select('inbox_id')
     .eq('property_id', userProp.property_id)
-    .single()
+    .eq('is_active', true)
 
-  // Use mapped inbox_id or fallback to query param
+  const inboxIds: string[] = (channels || [])
+    .map(c => c.inbox_id)
+    .filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+
+  // 2. Fallback to legacy chatwoot_inbox_mapping if no channels found
+  if (inboxIds.length === 0) {
+    const { data: legacyMapping } = await supabase
+      .from('chatwoot_inbox_mapping')
+      .select('inbox_id')
+      .eq('property_id', userProp.property_id)
+      .maybeSingle()
+
+    if (legacyMapping?.inbox_id) {
+      inboxIds.push(legacyMapping.inbox_id)
+    }
+  }
+
+  // 3. Early exit if no inboxes are mapped to this property
+  if (inboxIds.length === 0) {
+    return NextResponse.json({
+      conversations: [],
+      meta: {
+        all_count: 0,
+        open_count: 0,
+        resolved_count: 0,
+      },
+      stats: {
+        total: 0,
+        open: 0,
+        resolved: 0,
+        thisMonth: 0,
+      },
+    })
+  }
+
   const { searchParams } = new URL(request.url)
   const page = searchParams.get('page') || '1'
   const status = searchParams.get('status') || 'all'
-  const inboxId = mapping?.inbox_id
-
-  const inboxFilter = inboxId ? `&inbox_id=${inboxId}` : ''
 
   let allConversations: any[] = []
-  let meta: any = {}
+  let totalAllCount = 0
+  let totalOpenCount = 0
+  let totalResolvedCount = 0
 
-  if (status === 'all') {
-    // Chatwoot doesn't have a true "all" filter — fetch open + pending + resolved
-    const [openData, pendingData, resolvedData] = await Promise.all([
-      chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=open`),
-      chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=pending`),
-      chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=resolved`),
-    ])
+  try {
+    const results = await Promise.all(
+      inboxIds.map(async (inboxId) => {
+        const inboxFilter = `&inbox_id=${inboxId}`
+        if (status === 'all') {
+          const [openData, pendingData, resolvedData] = await Promise.all([
+            chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=open`),
+            chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=pending`),
+            chatwootFetch(`/conversations?page=${page}${inboxFilter}&status=resolved`),
+          ])
 
-    const openConvs = openData.data?.payload || []
-    const pendingConvs = pendingData.data?.payload || []
-    const resolvedConvs = resolvedData.data?.payload || []
+          const openConvs = openData.data?.payload || []
+          const pendingConvs = pendingData.data?.payload || []
+          const resolvedConvs = resolvedData.data?.payload || []
 
-    allConversations = [...pendingConvs, ...openConvs, ...resolvedConvs]
-    meta = {
-      all_count: (openData.data?.meta?.all_count || 0) + (pendingData.data?.meta?.all_count || 0) + (resolvedData.data?.meta?.all_count || 0),
-      open_count: openData.data?.meta?.all_count || 0,
-      resolved_count: resolvedData.data?.meta?.all_count || 0,
-    }
-  } else {
-    const data = await chatwootFetch(
-      `/conversations?page=${page}${inboxFilter}&status=${status}`
+          return {
+            convs: [...pendingConvs, ...openConvs, ...resolvedConvs],
+            all_count: (openData.data?.meta?.all_count || 0) + (pendingData.data?.meta?.all_count || 0) + (resolvedData.data?.meta?.all_count || 0),
+            open_count: openData.data?.meta?.all_count || 0,
+            resolved_count: resolvedData.data?.meta?.all_count || 0,
+          }
+        } else {
+          const data = await chatwootFetch(
+            `/conversations?page=${page}${inboxFilter}&status=${status}`
+          )
+          const convs = data.data?.payload || []
+          const count = data.data?.meta?.all_count || 0
+          return {
+            convs,
+            all_count: count,
+            open_count: status === 'open' ? count : 0,
+            resolved_count: status === 'resolved' ? count : 0,
+          }
+        }
+      })
     )
-    allConversations = data.data?.payload || []
-    meta = data.data?.meta || {}
+
+    // Merge results
+    for (const r of results) {
+      allConversations.push(...r.convs)
+      totalAllCount += r.all_count
+      totalOpenCount += r.open_count
+      totalResolvedCount += r.resolved_count
+    }
+
+    // Sort combined conversations by last_activity_at descending
+    allConversations.sort((a, b) => b.last_activity_at - a.last_activity_at)
+
+  } catch (err) {
+    console.error('[GET /api/conversations] Chatwoot fetch failed:', err)
+    return NextResponse.json({ error: 'Failed to fetch conversations from Chatwoot' }, { status: 502 })
+  }
+
+  const meta = {
+    all_count: totalAllCount,
+    open_count: totalOpenCount,
+    resolved_count: totalResolvedCount,
   }
   // Calculate stats for current month
   const now = new Date()

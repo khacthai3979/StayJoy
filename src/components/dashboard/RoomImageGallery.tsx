@@ -22,6 +22,7 @@ export function RoomImageGallery({ roomId }: RoomImageGalleryProps) {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
@@ -125,10 +126,15 @@ export function RoomImageGallery({ roomId }: RoomImageGalleryProps) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium text-muted-foreground">
-          Hình ảnh ({images.length}/10)
-        </h4>
+      <div className="flex items-start justify-between">
+        <div className="space-y-0.5">
+          <h4 className="text-sm font-medium text-muted-foreground">
+            Hình ảnh ({images.length}/10)
+          </h4>
+          <p className="text-[11px] text-muted-foreground leading-normal max-w-sm">
+            Khuyến nghị: Chọn ảnh ngang tỷ lệ 16:9 rõ nét, chất lượng cao (tối đa 5MB) để hiển thị tốt nhất trên Telegram/Zalo và tránh bị mờ khi co giãn.
+          </p>
+        </div>
         <div>
           <input
             ref={fileInputRef}
@@ -166,7 +172,8 @@ export function RoomImageGallery({ roomId }: RoomImageGalleryProps) {
               <img
                 src={img.image_url}
                 alt={`Phòng ${img.room_id}`}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover cursor-zoom-in hover:scale-105 transition-transform duration-300"
+                onClick={() => setSelectedImageUrl(img.image_url)}
               />
               <button
                 onClick={() => handleDelete(img.id)}
@@ -178,6 +185,28 @@ export function RoomImageGallery({ roomId }: RoomImageGalleryProps) {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Lightbox Preview Modal */}
+      {selectedImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity duration-300"
+          onClick={() => setSelectedImageUrl(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[80vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={selectedImageUrl}
+              alt="Xem ảnh phòng"
+              className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl border border-white/10"
+            />
+            <button
+              onClick={() => setSelectedImageUrl(null)}
+              className="absolute -top-12 right-0 flex items-center justify-center h-8 px-4 rounded-full bg-black/60 text-white text-xs font-medium border border-white/20 hover:bg-white hover:text-black transition-all cursor-pointer"
+            >
+              Đóng (✕)
+            </button>
+          </div>
         </div>
       )}
     </div>

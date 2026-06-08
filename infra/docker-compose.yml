@@ -65,8 +65,14 @@ services:
     environment:
       - RAILS_ENV=production
       - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY:-replace_with_random_64_char_string}
+      - FRONTEND_URL=https://chat.stayjoy.io.vn
       - DATABASE_URL=postgres://chatwoot:chatwoot@chatwoot-postgres:5432/chatwoot_production
       - REDIS_URL=redis://redis:6379
+      - RAILS_LOG_TO_STDOUT=true
+      - FB_APP_ID=26218463624451186
+      - FB_APP_SECRET=ae962566e0b2ca743e48341db0ab7154
+      - FB_VERIFY_TOKEN=StayJoyVerify2026
+      - IG_VERIFY_TOKEN=StayJoyVerify2026
     extra_hosts:
       - "app.stayjoy.io.vn:host-gateway"
     depends_on:
