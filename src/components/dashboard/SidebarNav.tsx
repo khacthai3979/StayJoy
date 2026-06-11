@@ -2,17 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bot, Cpu, CreditCard, LogOut, TableOfContents, CalendarCheck2, ClipboardList, Building, MessageCircle, type LucideIcon } from 'lucide-react'
+import { Bot, Cpu, CreditCard, LogOut, TableOfContents, ClipboardList, Building, MessageCircle, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 
 const navItems: { href: string; label: string; icon?: LucideIcon }[] = [
   { href: '/dashboard', label: 'Tổng Quan', icon: TableOfContents },
-  { href: '/dashboard/calendar', label: 'Lịch Phòng', icon: CalendarCheck2 },
+  // { href: '/dashboard/calendar', label: 'Lịch Phòng', icon: CalendarCheck2 }, // Tạm ẩn — sẽ mở lại khi có tính năng mở rộng
   { href: '/dashboard/bookings', label: 'Yêu Cầu Đặt Phòng', icon: ClipboardList },
   { href: '/dashboard/rooms', label: 'Quản Lý Phòng', icon: Building },
   { href: '/dashboard/conversations', label: 'Hội Thoại', icon: MessageCircle },
-  { href: '/dashboard/ai-chatbot', label: 'AI Chatbot', icon: Bot },
+  { href: '/dashboard/knowledge-base', label: 'Knowledge Base', icon: Bot },
   { href: '/dashboard/usage', label: 'Sử Dụng AI', icon: Cpu },
   { href: '/dashboard/billing', label: 'Ví & Thanh Toán', icon: CreditCard },
 ]

@@ -199,4 +199,19 @@ describe('buildSystemMessage', () => {
     expect(resPro).toContain('KHI NÀO GỢI Ý DỊCH VỤ THÊM (UPSELL)')
     expect(resPremium).toContain('KHI NÀO GỢI Ý DỊCH VỤ THÊM (UPSELL)')
   })
+
+  it('includes THỜI GIAN HIỆN TẠI and date validation rules when currentDate is passed', () => {
+    const sections: KnowledgeSection[] = [
+      {
+        section_key: 'general_info',
+        title: 'Thông Tin Chung',
+        content: 'Homestay ABC',
+        is_active: true,
+        sort_order: 0,
+      },
+    ]
+    const result = buildSystemMessage(sections, [], 'trial', 'Thứ Tư, ngày 10/06/2026')
+    expect(result).toContain('THỜI GIAN HIỆN TẠI: Thứ Tư, ngày 10/06/2026')
+    expect(result).toContain('KHÔNG nhận đặt phòng nếu ngày check-in/out đã qua')
+  })
 })

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const MAX_IMAGES_PER_ROOM = 10
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+const MIN_FILE_SIZE = 10 * 1024 // 10KB — images smaller than this are likely thumbnails and will display blurry
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 /**
@@ -102,6 +103,13 @@ export async function POST(
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
         { error: 'Chỉ chấp nhận file jpg, png, webp' },
+        { status: 400 }
+      )
+    }
+
+    if (file.size < MIN_FILE_SIZE) {
+      return NextResponse.json(
+        { error: 'Ảnh quá nhỏ (dưới 10KB). Vui lòng chọn ảnh có chất lượng cao hơn để hiển thị rõ nét trên Messenger/Zalo. Mẹo: Khi tải ảnh từ Booking.com, hãy mở ảnh phóng to rồi lưu thay vì lưu ảnh thu nhỏ.' },
         { status: 400 }
       )
     }

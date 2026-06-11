@@ -9,7 +9,7 @@ import { ChatTestWidget } from '@/components/knowledge-base/ChatTestWidget'
 import { VALID_SECTION_KEYS } from '@/lib/knowledge-base/types'
 import type { SectionKey, KnowledgeBaseSection, SectionUpdate } from '@/lib/knowledge-base/types'
 
-export default function AIChatbotPage() {
+export default function KnowledgeBasePage() {
   const [sections, setSections] = useState<KnowledgeBaseSection[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -99,7 +99,7 @@ export default function AIChatbotPage() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">AI Chatbot — Quản Lý Knowledge Base</h1>
+        <h1 className="text-2xl font-bold">Cơ Sở Tri Thức (Knowledge Base)</h1>
         <Button variant="outline" onClick={() => setPreviewOpen(true)}>
           Xem Preview
         </Button>

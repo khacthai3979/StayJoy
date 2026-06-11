@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { buildSystemMessage, KnowledgeSection, Room } from '@/lib/knowledge-base/builder'
 import { callLLM } from '@/lib/llm/provider'
 import { debounceMessage } from '@/lib/message-debounce'
+import { sendEmail } from '@/lib/email'
 
 /**
  * POST /api/chatwoot/webhook
@@ -119,6 +120,50 @@ async function sendImageToChatwoot(
   }
 }
 
+async function getOwnerEmail(supabase: any, propertyId: string): Promise<string | null> {
+  try {
+    const { data: userProps, error: err1 } = await supabase
+      .from('users_properties')
+      .select('user_id, role')
+      .eq('property_id', propertyId)
+
+    if (err1 || !userProps) {
+      console.warn(`[Chatwoot Webhook] No users linked to property=${propertyId}`, err1)
+      return null
+    }
+
+    const propsArray = Array.isArray(userProps) ? userProps : [userProps]
+    if (propsArray.length === 0) {
+      return null
+    }
+
+    // Sort to prefer 'owner', then 'admin', then others
+    const preferred = [...propsArray].sort((a: any, b: any) => {
+      const rolesOrder = ['owner', 'admin', 'user']
+      const idxA = rolesOrder.indexOf(a?.role) !== -1 ? rolesOrder.indexOf(a?.role) : 99
+      const idxB = rolesOrder.indexOf(b?.role) !== -1 ? rolesOrder.indexOf(b?.role) : 99
+      return idxA - idxB
+    })
+
+    const userId = preferred[0]?.user_id
+    if (!userId) return null
+
+    const { data: userData, error: err2 } = await supabase.auth.admin.getUserById(
+      userId
+    )
+
+    if (err2 || !userData?.user?.email) {
+      console.warn(`[Chatwoot Webhook] Email not found for user_id=${userId}`, err2)
+      return null
+    }
+
+    return userData.user.email
+  } catch (err) {
+    console.error('[Chatwoot Webhook] Error retrieving owner email:', err)
+    return null
+  }
+}
+
 async function getConversationHistory(
 
   accountId: number,
@@ -146,8 +191,15 @@ async function getConversationHistory(
     const data = await res.json()
     const messages = data?.payload || []
     
+    // Sort messages by timestamp ascending (oldest first) to guarantee correct chronological order
+    const sorted = [...messages].sort((a: any, b: any) => {
+      const t1 = typeof a.created_at === 'number' ? a.created_at * 1000 : new Date(a.created_at).getTime()
+      const t2 = typeof b.created_at === 'number' ? b.created_at * 1000 : new Date(b.created_at).getTime()
+      return t1 - t2
+    })
+
     // Filter out private notes and empty/system messages
-    const filtered = messages.filter(
+    const filtered = sorted.filter(
       (m: any) => !m.private && m.content && (m.message_type === 0 || m.message_type === 1)
     )
 
@@ -252,7 +304,7 @@ export async function POST(request: NextRequest) {
     const [propertyRes, usageRes] = await Promise.all([
       supabase
         .from('properties')
-        .select('plan, expires_at')
+        .select('plan, expires_at, telegram_chat_id')
         .eq('id', propertyId)
         .single(),
       supabase
@@ -263,47 +315,63 @@ export async function POST(request: NextRequest) {
         .maybeSingle()
     ])
 
-    const plan = propertyRes.data?.plan?.toLowerCase() || 'trial'
+    // If property query failed (e.g. RLS/network error), log and skip quota enforcement
+    // to avoid falsely blocking premium users due to a DB read error.
+    if (propertyRes.error || !propertyRes.data) {
+      console.error(`[Chatwoot Webhook] Failed to fetch property plan for property=${propertyId}:`, propertyRes.error)
+      // Fall through — do not apply quota if we cannot determine the plan
+    } else {
+      console.log(`[Chatwoot Webhook] Property plan resolved: property=${propertyId}, plan=${propertyRes.data.plan}, expires_at=${propertyRes.data.expires_at}`)
+    }
+
+    const plan = propertyRes.data?.plan?.toLowerCase() ?? null
     const expiresAt = propertyRes.data?.expires_at
-    const isExpired = expiresAt ? new Date(expiresAt) < now : false
     const messageCount = usageRes.data?.message_count || 0
 
-    if (isExpired) {
-      console.log(`[Chatwoot Webhook] Subscription expired for property=${propertyId}`)
-      const expiredMessage = `⚠️ Hệ thống tự động: Gói dịch vụ của Homestay đã hết hạn sử dụng. Chatbot đã tạm ngưng. Vui lòng truy cập trang Ví & Thanh toán hoặc liên hệ admin để gia hạn gói cước.`
-      await replyToChatwoot(
-        accountId,
-        conversationId,
-        expiredMessage,
-        'private'
-      )
-      return NextResponse.json({ status: 'subscription_expired' })
+    // Only enforce quota/expiry if we could successfully read the property from DB.
+    // If propertyRes.data is null (e.g. RLS error, network blip), skip enforcement
+    // to avoid falsely blocking premium users due to a transient DB read failure.
+    if (plan !== null) {
+      const isExpired = expiresAt ? new Date(expiresAt) < now : false
+
+      if (isExpired) {
+        console.log(`[Chatwoot Webhook] Subscription expired for property=${propertyId}`)
+        const expiredMessage = `⚠️ Hệ thống tự động: Gói dịch vụ của Homestay đã hết hạn sử dụng. Chatbot đã tạm ngưng. Vui lòng truy cập trang Ví & Thanh toán hoặc liên hệ admin để gia hạn gói cước.`
+        await replyToChatwoot(
+          accountId,
+          conversationId,
+          expiredMessage,
+          'private'
+        )
+        return NextResponse.json({ status: 'subscription_expired' })
+      }
+
+      const planLimits: Record<string, number> = {
+        'trial': 50,
+        'lite': 1000,
+        'pro': 2500,
+        'premium': 4000
+      }
+      const limit = planLimits[plan] ?? 1000
+
+      if (messageCount >= limit) {
+        console.log(`[Chatwoot Webhook] Quota exceeded for property=${propertyId}, plan=${plan}, count=${messageCount}/${limit}`)
+
+        const isTrial = plan === 'trial'
+        const exceededMessage = isTrial
+          ? `⚠️ Hệ thống tự động: Homestay của bạn đang sử dụng gói dùng thử (TRIAL) và đã sử dụng hết hạn mức 50 tin nhắn miễn phí. Chatbot đã tạm ngưng. Bạn có muốn nâng cấp gói cước hay không? Vui lòng truy cập trang Ví & Thanh toán hoặc liên hệ admin để nâng cấp gói.`
+          : `⚠️ Hệ thống tự động: Homestay của bạn đang sử dụng gói ${plan.toUpperCase()} và đã dùng hết giới hạn ${limit} tin nhắn của tháng này. Chatbot đã tạm ngưng. Vui lòng chat trực tiếp với khách hoặc liên hệ admin để tiếp tục sử dụng.`
+
+        await replyToChatwoot(
+          accountId,
+          conversationId,
+          exceededMessage,
+          'private'
+        )
+        return NextResponse.json({ status: 'quota_exceeded' })
+      }
     }
 
-    const planLimits: Record<string, number> = {
-      'trial': 50,
-      'lite': 1000,
-      'pro': 2500,
-      'premium': 4000
-    }
-    const limit = planLimits[plan] || 1000
-
-    if (messageCount >= limit) {
-      console.log(`[Chatwoot Webhook] Quota exceeded for property=${propertyId}, plan=${plan}, count=${messageCount}/${limit}`)
-      
-      const isTrial = plan === 'trial'
-      const exceededMessage = isTrial
-        ? `⚠️ Hệ thống tự động: Homestay của bạn đang sử dụng gói dùng thử (TRIAL) và đã sử dụng hết hạn mức 50 tin nhắn miễn phí. Chatbot đã tạm ngưng. Bạn có muốn nâng cấp gói cước hay không? Vui lòng truy cập trang Ví & Thanh toán hoặc liên hệ admin để nâng cấp gói.`
-        : `⚠️ Hệ thống tự động: Homestay của bạn đang sử dụng gói ${plan.toUpperCase()} và đã dùng hết giới hạn ${limit} tin nhắn miễn phí của tháng này. Chatbot đã tạm ngưng. Vui lòng chat trực tiếp với khách hoặc nâng cấp gói để tiếp tục sử dụng.`
-
-      await replyToChatwoot(
-        accountId, 
-        conversationId, 
-        exceededMessage,
-        'private'
-      )
-      return NextResponse.json({ status: 'quota_exceeded' })
-    }
 
     // Build system message from knowledge base
     const [sectionsResult, roomsResult, imagesResult] = await Promise.all([
@@ -326,8 +394,16 @@ export async function POST(request: NextRequest) {
     const rooms: Room[] = roomsResult.data ?? []
     const roomImages = imagesResult.data ?? []
 
+    // Format the current date/time to pass to the system message builder
+    const day = String(now.getDate()).padStart(2, '0')
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const year = now.getFullYear()
+    const daysOfWeek = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy']
+    const dayOfWeek = daysOfWeek[now.getDay()]
+    const currentDateStr = `${dayOfWeek}, ngày ${day}/${month}/${year}`
+
     // Build system message
-    let systemMessage = buildSystemMessage(sections, rooms, plan)
+    let systemMessage = buildSystemMessage(sections, rooms, plan, currentDateStr)
 
     // Fetch and append conversation history for context
     const history = await getConversationHistory(accountId, conversationId)
@@ -374,9 +450,10 @@ export async function POST(request: NextRequest) {
     // Scan for [SHOW_IMAGES:room_id] tags
     const imageTags = llmResponse.answer.match(/\[SHOW_IMAGES:[^\]]+\]/g) || []
 
-    // Reply to Chatwoot (strip tag before sending to customer)
+    // Reply to Chatwoot (strip tags before sending to customer)
     const cleanAnswer = llmResponse.answer
       .replace(/\[BOOKING_REQUEST\|[^\]]*\]/g, '')
+      .replace(/\[OWNER_REQUEST\|[^\]]*\]/g, '')
       .replace(/\[SHOW_IMAGES:[^\]]+\]/g, '')
       .trim()
     await replyToChatwoot(accountId, conversationId, cleanAnswer)
@@ -435,6 +512,42 @@ export async function POST(request: NextRequest) {
         const privateNote = `🔔 YÊU CẦU ĐẶT PHÒNG MỚI:\n👤 Tên: ${fields.ten || 'N/A'}\n📱 SĐT: ${fields.sdt || 'N/A'}\n📅 Check-in: ${fields.checkin || 'N/A'}\n📅 Check-out: ${fields.checkout || 'N/A'}\n🛏️ Phòng: ${fields.phong || 'N/A'}\n👥 Số người: ${fields.songuoi || 'N/A'}\n\n→ Vui lòng liên hệ khách để xác nhận.`
         await replyToChatwoot(accountId, conversationId, privateNote, 'private')
         console.log(`[Chatwoot Webhook] Booking request created for property=${propertyId}`)
+
+        // Send Email notification to owner
+        const ownerEmail = await getOwnerEmail(supabase, propertyId)
+        if (ownerEmail) {
+          const emailSubject = `[StayJoy] Yêu cầu đặt phòng mới từ khách hàng`
+          const emailText = `🔔 YÊU CẦU ĐẶT PHÒNG MỚI:\n\n👤 Họ tên: ${fields.ten || 'Không rõ'}\n📱 SĐT: ${fields.sdt || 'N/A'}\n📅 Check-in: ${fields.checkin || 'N/A'}\n📅 Check-out: ${fields.checkout || 'N/A'}\n🛏️ Loại phòng: ${fields.phong || 'N/A'}\n👥 Số khách: ${fields.songuoi || 'N/A'}\n\n→ Vui lòng liên hệ khách để xác nhận.\nXem chi tiết tại: https://app.stayjoy.io.vn/dashboard`
+          await sendEmail(ownerEmail, emailSubject, emailText)
+        }
+      }
+    }
+
+    // Check if AI requested owner assistance (tag in response)
+    const ownerMatch = llmResponse.answer.match(/\[OWNER_REQUEST\|([^\]]+)\]/)
+    if (ownerMatch) {
+      const tagContent = ownerMatch[1]
+      const fields: Record<string, string> = {}
+      tagContent.split('|').forEach(pair => {
+        const [key, ...valueParts] = pair.split('=')
+        if (key && valueParts.length > 0) {
+          fields[key.trim()] = valueParts.join('=').trim()
+        }
+      })
+
+      const reason = fields.message || 'Khách hàng có yêu cầu cần hỗ trợ trực tiếp'
+      
+      // Send private note to owner on Chatwoot
+      const privateNote = `🔔 KHÁCH HÀNG CẦN HỖ TRỢ:\n💬 Nội dung: ${reason}\n\n→ Vui lòng vào chat trực tiếp hoặc liên hệ khách hàng.`
+      await replyToChatwoot(accountId, conversationId, privateNote, 'private')
+      console.log(`[Chatwoot Webhook] Owner assistance request detected for property=${propertyId}`)
+
+      // Send Email to owner
+      const ownerEmail = await getOwnerEmail(supabase, propertyId)
+      if (ownerEmail) {
+        const emailSubject = `[StayJoy] Khách hàng yêu cầu hỗ trợ trực tiếp`
+        const emailText = `🔔 KHÁCH HÀNG CẦN HỖ TRỢ:\n\n💬 Nội dung: ${reason}\n\nVui lòng truy cập Chatwoot để xem chi tiết hội thoại.`
+        await sendEmail(ownerEmail, emailSubject, emailText)
       }
     }
 

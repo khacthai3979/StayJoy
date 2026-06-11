@@ -62,6 +62,14 @@ export function RoomImageGallery({ roomId }: RoomImageGalleryProps) {
       })
       return
     }
+    if (file.size < 10 * 1024) {
+      toast({
+        title: 'Ảnh quá nhỏ',
+        description: 'Ảnh dưới 10KB sẽ hiển thị mờ trên Messenger/Zalo. Hãy chọn ảnh chất lượng cao hơn. Mẹo: Khi tải từ Booking.com, mở ảnh phóng to rồi lưu.',
+        variant: 'destructive',
+      })
+      return
+    }
     if (file.size > 5 * 1024 * 1024) {
       toast({
         title: 'File quá lớn',
