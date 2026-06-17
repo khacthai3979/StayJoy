@@ -4,6 +4,13 @@ import { buildSystemMessage, KnowledgeSection, Room } from '@/lib/knowledge-base
 import { callLLM } from '@/lib/llm/provider'
 import { debounceMessage } from '@/lib/message-debounce'
 import { sendEmail } from '@/lib/email'
+import { checkRateLimit, checkInappropriateLanguage, checkJailbreak } from '@/lib/chatbot/moderation'
+import { checkWebhookRateLimit } from '@/lib/chatbot/webhook-rate-limit'
+import { logger } from '@/lib/logger'
+
+// --- LLM Cost Guard: In-memory daily call counter per property ---
+const llmDailyCallCounter = new Map<string, { date: string; count: number }>()
+const LLM_DAILY_ALERT_THRESHOLD = 200 // Warn if a property exceeds this many LLM calls per day
 
 /**
  * POST /api/chatwoot/webhook
@@ -33,6 +40,7 @@ interface ChatwootWebhookPayload {
       name?: string
       phone_number?: string
     }
+    labels?: string[]
   }
   inbox?: {
     id: number
@@ -122,6 +130,18 @@ async function sendImageToChatwoot(
 
 async function getOwnerEmail(supabase: any, propertyId: string): Promise<string | null> {
   try {
+    // 1. Check if property has a custom notification_email configured
+    const { data: prop, error: propErr } = await supabase
+      .from('properties')
+      .select('notification_email')
+      .eq('id', propertyId)
+      .maybeSingle()
+
+    if (!propErr && prop?.notification_email && prop.notification_email.trim() !== '') {
+      return prop.notification_email.trim()
+    }
+
+    // 2. Fallback to users_properties lookup (original logic)
     const { data: userProps, error: err1 } = await supabase
       .from('users_properties')
       .select('user_id, role')
@@ -226,6 +246,25 @@ async function getConversationHistory(
 export async function POST(request: NextRequest) {
 
   try {
+    // --- LỚP 0: Chống spam IP (Webhook IP Rate Limiter) ---
+    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     request.headers.get('x-real-ip') ||
+                     'unknown'
+    const ipRateLimit = checkWebhookRateLimit(clientIp)
+    if (ipRateLimit.isLimited) {
+      logger.warn('Webhook IP rate limited', { ip: clientIp, retryAfter: ipRateLimit.retryAfterSeconds })
+      return NextResponse.json(
+        { status: 'error', reason: 'too_many_requests' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(ipRateLimit.retryAfterSeconds || 60),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      )
+    }
+
     const payload: ChatwootWebhookPayload = await request.json()
 
     // Only process incoming messages (from customer)
@@ -265,7 +304,65 @@ export async function POST(request: NextRequest) {
     // Chờ debounce hoàn tất (30s sau tin nhắn cuối cùng)
     const combinedContent = await debouncedMessage
 
+    // --- LỚP 1: Chống spam tần suất gửi (Rate Limiter) ---
+    const rateLimit = checkRateLimit(String(conversationId))
+    if (rateLimit.isLimited) {
+      logger.warn('Conversation rate limited', { conversationId })
+      await replyToChatwoot(
+        accountId,
+        conversationId,
+        '⚠️ Hệ thống nhận thấy bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
+      )
+      return NextResponse.json({ status: 'ignored', reason: 'rate_limited' })
+    }
+
+    // --- LỚP 2: Chặn ngôn từ tục tĩu/không chuẩn mực ---
+    if (checkInappropriateLanguage(combinedContent)) {
+      logger.warn('Inappropriate language detected', { conversationId, content: combinedContent.slice(0, 100) })
+      
+      // 1. Phản hồi khách hàng
+      await replyToChatwoot(
+        accountId,
+        conversationId,
+        '⚠️ Hệ thống ghi nhận ngôn từ không phù hợp. Vui lòng trao đổi văn minh, chuẩn mực để được trợ lý ảo hỗ trợ.'
+      )
+      
+      // 2. Ghi chú bảo mật cho chủ nhà
+      const privateAlert = `🚨 CẢNH BÁO AN TOÀN:\nKhách hàng gửi tin nhắn chứa ngôn từ không chuẩn mực:\n"${combinedContent}"\n\n→ Chatbot đã từ chối trả lời.`
+      await replyToChatwoot(accountId, conversationId, privateAlert, 'private')
+      
+      return NextResponse.json({ status: 'ignored', reason: 'inappropriate_language' })
+    }
+
+    // --- LỚP 3: Chặn mã độc câu lệnh / Phá quy tắc (Jailbreak) ---
+    if (checkJailbreak(combinedContent)) {
+      logger.warn('Jailbreak attempt detected', { conversationId, content: combinedContent.slice(0, 100) })
+      
+      // 1. Phản hồi khách hàng
+      await replyToChatwoot(
+        accountId,
+        conversationId,
+        '⚠️ Yêu cầu của bạn nằm ngoài phạm vi hỗ trợ của Lễ tân AI. Em chỉ hỗ trợ giải đáp thông tin homestay và đặt phòng thôi ạ!'
+      )
+      
+      // 2. Ghi chú bảo mật cho chủ nhà
+      const privateAlert = `🚨 CẢNH BÁO AN TOÀN:\nKhách hàng có dấu hiệu gửi câu hỏi phá vỡ quy tắc hoạt động (Jailbreak/Prompt Injection):\n"${combinedContent}"\n\n→ Chatbot đã từ chối thực hiện yêu cầu này.`
+      await replyToChatwoot(accountId, conversationId, privateAlert, 'private')
+      
+      return NextResponse.json({ status: 'ignored', reason: 'jailbreak_attempt' })
+    }
+
     const supabase = createServiceClient()
+
+    // --- LỚP 4: Kiểm tra trạng thái Tắt/Bật Chatbot (Mute State qua Label) ---
+    const labels = payload.conversation?.labels || []
+    const isMuted = labels.some(
+      (label) => label.toLowerCase() === 'tat-chatbot' || label.toLowerCase() === 'tat_chatbot'
+    )
+    if (isMuted) {
+      logger.info('Chatbot muted via label', { conversationId })
+      return NextResponse.json({ status: 'ignored', reason: 'chatbot_muted_via_label' })
+    }
 
     // 1. First, lookup property_id from the active channel_mappings table (configured via Admin UI)
     const { data: channelMapping } = await supabase
@@ -278,7 +375,7 @@ export async function POST(request: NextRequest) {
 
     if (channelMapping) {
       if (!channelMapping.is_active) {
-        console.log(`[Chatwoot Webhook] Channel for inbox_id=${inboxId} is inactive. Ignored.`)
+        logger.info('Channel inactive, ignored', { inboxId })
         return NextResponse.json({ status: 'ignored', reason: 'channel inactive' })
       }
       propertyId = channelMapping.property_id
@@ -291,7 +388,7 @@ export async function POST(request: NextRequest) {
         .maybeSingle()
 
       if (!legacyMapping) {
-        console.error(`[Chatwoot Webhook] No mapping for inbox_id=${inboxId}`)
+        logger.error('No inbox mapping found', { inboxId })
         return NextResponse.json({ status: 'error', reason: 'inbox not mapped' }, { status: 404 })
       }
       propertyId = legacyMapping.property_id
@@ -318,10 +415,10 @@ export async function POST(request: NextRequest) {
     // If property query failed (e.g. RLS/network error), log and skip quota enforcement
     // to avoid falsely blocking premium users due to a DB read error.
     if (propertyRes.error || !propertyRes.data) {
-      console.error(`[Chatwoot Webhook] Failed to fetch property plan for property=${propertyId}:`, propertyRes.error)
+      logger.error('Failed to fetch property plan', { propertyId, error: propertyRes.error?.message })
       // Fall through — do not apply quota if we cannot determine the plan
     } else {
-      console.log(`[Chatwoot Webhook] Property plan resolved: property=${propertyId}, plan=${propertyRes.data.plan}, expires_at=${propertyRes.data.expires_at}`)
+      logger.info('Property plan resolved', { propertyId, plan: propertyRes.data.plan, expiresAt: propertyRes.data.expires_at })
     }
 
     const plan = propertyRes.data?.plan?.toLowerCase() ?? null
@@ -335,7 +432,7 @@ export async function POST(request: NextRequest) {
       const isExpired = expiresAt ? new Date(expiresAt) < now : false
 
       if (isExpired) {
-        console.log(`[Chatwoot Webhook] Subscription expired for property=${propertyId}`)
+        logger.warn('Subscription expired', { propertyId })
         const expiredMessage = `⚠️ Hệ thống tự động: Gói dịch vụ của Homestay đã hết hạn sử dụng. Chatbot đã tạm ngưng. Vui lòng truy cập trang Ví & Thanh toán hoặc liên hệ admin để gia hạn gói cước.`
         await replyToChatwoot(
           accountId,
@@ -355,7 +452,7 @@ export async function POST(request: NextRequest) {
       const limit = planLimits[plan] ?? 1000
 
       if (messageCount >= limit) {
-        console.log(`[Chatwoot Webhook] Quota exceeded for property=${propertyId}, plan=${plan}, count=${messageCount}/${limit}`)
+        logger.warn('Quota exceeded', { propertyId, plan, messageCount, limit })
 
         const isTrial = plan === 'trial'
         const exceededMessage = isTrial
@@ -447,6 +544,23 @@ export async function POST(request: NextRequest) {
       plan
     )
 
+    // --- LLM Cost Guard: Track daily calls per property ---
+    const todayStr = new Date().toISOString().split('T')[0]
+    const costKey = propertyId
+    const costEntry = llmDailyCallCounter.get(costKey)
+    if (costEntry && costEntry.date === todayStr) {
+      costEntry.count++
+      if (costEntry.count === LLM_DAILY_ALERT_THRESHOLD) {
+        logger.warn('LLM daily call threshold exceeded', {
+          propertyId,
+          dailyCalls: costEntry.count,
+          threshold: LLM_DAILY_ALERT_THRESHOLD,
+        })
+      }
+    } else {
+      llmDailyCallCounter.set(costKey, { date: todayStr, count: 1 })
+    }
+
     // Scan for [SHOW_IMAGES:room_id] tags
     const imageTags = llmResponse.answer.match(/\[SHOW_IMAGES:[^\]]+\]/g) || []
 
@@ -471,8 +585,17 @@ export async function POST(request: NextRequest) {
         if (match) {
           const roomId = match[1].trim()
           const urls = imagesByRoom[roomId] || []
-          for (const url of urls) {
-            await sendImageToChatwoot(accountId, conversationId, url)
+          
+          if (urls.length > 0) {
+            const roomInfo = rooms.find(r => r.room_id === roomId)
+            const roomName = roomInfo ? `${roomInfo.loai_phong} (Phòng ${roomInfo.room_id})` : `Phòng ${roomId}`
+            
+            // Send a text message to clarify which room the following images belong to
+            await replyToChatwoot(accountId, conversationId, `📸 Dạ đây là hình ảnh của **${roomName}** ạ:`)
+            
+            for (const url of urls) {
+              await sendImageToChatwoot(accountId, conversationId, url)
+            }
           }
         }
       }
@@ -506,12 +629,12 @@ export async function POST(request: NextRequest) {
         })
 
       if (bookingError) {
-        console.error('[Chatwoot Webhook] Failed to create booking request:', bookingError)
+        logger.error('Failed to create booking request', { propertyId, error: bookingError.message })
       } else {
         // Send private note to owner
         const privateNote = `🔔 YÊU CẦU ĐẶT PHÒNG MỚI:\n👤 Tên: ${fields.ten || 'N/A'}\n📱 SĐT: ${fields.sdt || 'N/A'}\n📅 Check-in: ${fields.checkin || 'N/A'}\n📅 Check-out: ${fields.checkout || 'N/A'}\n🛏️ Phòng: ${fields.phong || 'N/A'}\n👥 Số người: ${fields.songuoi || 'N/A'}\n\n→ Vui lòng liên hệ khách để xác nhận.`
         await replyToChatwoot(accountId, conversationId, privateNote, 'private')
-        console.log(`[Chatwoot Webhook] Booking request created for property=${propertyId}`)
+        logger.info('Booking request created', { propertyId, conversationId })
 
         // Send Email notification to owner
         const ownerEmail = await getOwnerEmail(supabase, propertyId)
@@ -540,7 +663,7 @@ export async function POST(request: NextRequest) {
       // Send private note to owner on Chatwoot
       const privateNote = `🔔 KHÁCH HÀNG CẦN HỖ TRỢ:\n💬 Nội dung: ${reason}\n\n→ Vui lòng vào chat trực tiếp hoặc liên hệ khách hàng.`
       await replyToChatwoot(accountId, conversationId, privateNote, 'private')
-      console.log(`[Chatwoot Webhook] Owner assistance request detected for property=${propertyId}`)
+      logger.info('Owner assistance request detected', { propertyId, conversationId })
 
       // Send Email to owner
       const ownerEmail = await getOwnerEmail(supabase, propertyId)
@@ -580,7 +703,7 @@ export async function POST(request: NextRequest) {
       model: llmResponse.model,
     })
   } catch (error) {
-    console.error('[POST /api/chatwoot/webhook]', error)
+    logger.error('Webhook handler error', { error: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

@@ -16,7 +16,7 @@ export async function GET() {
     // Get property linked to the current user via users_properties
     const { data, error } = await supabase
       .from('users_properties')
-      .select('property_id, properties(id, name, address, hotline, description, system_prompt_template, plan, expires_at)')
+      .select('property_id, properties(id, name, address, hotline, description, system_prompt_template, plan, expires_at, notification_email)')
       .eq('user_id', session.user.id)
       .single()
 
@@ -45,6 +45,7 @@ export async function PUT(request: NextRequest) {
     hotline?: unknown
     description?: unknown
     system_prompt_template?: unknown
+    notification_email?: unknown
   }
   try {
     body = await request.json()
@@ -52,7 +53,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { name, address, hotline, description, system_prompt_template } = body
+  const { name, address, hotline, description, system_prompt_template, notification_email } = body
 
   // Build update payload with only provided fields
   const updates: Record<string, string> = {}
@@ -61,6 +62,7 @@ export async function PUT(request: NextRequest) {
   if (hotline !== undefined) updates.hotline = String(hotline)
   if (description !== undefined) updates.description = String(description)
   if (system_prompt_template !== undefined) updates.system_prompt_template = String(system_prompt_template)
+  if (notification_email !== undefined) updates.notification_email = notification_email ? String(notification_email) : ''
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
@@ -82,7 +84,7 @@ export async function PUT(request: NextRequest) {
       .from('properties')
       .update(updates)
       .eq('id', ownership.property_id)
-      .select('id, name, address, hotline, description, system_prompt_template')
+      .select('id, name, address, hotline, description, system_prompt_template, notification_email')
       .single()
 
     if (error) throw error

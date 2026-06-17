@@ -101,6 +101,22 @@ export async function POST(request: NextRequest) {
 
   const serviceClient = getServiceClient()
 
+  if (inbox_id) {
+    const { data: existing } = await serviceClient
+      .from('channel_mappings')
+      .select('property_id, properties(name)')
+      .eq('inbox_id', String(inbox_id))
+      .maybeSingle()
+
+    if (existing) {
+      const propName = (existing as any).properties?.name || 'homestay khác'
+      return NextResponse.json(
+        { error: `Inbox ID ${inbox_id} đã được gán cho Homestay "${propName}".` },
+        { status: 400 }
+      )
+    }
+  }
+
   const { data, error } = await serviceClient
     .from('channel_mappings')
     .insert({
@@ -153,6 +169,23 @@ export async function PUT(request: NextRequest) {
   }
 
   const serviceClient = getServiceClient()
+
+  if (body.inbox_id) {
+    const { data: existing } = await serviceClient
+      .from('channel_mappings')
+      .select('id, property_id, properties(name)')
+      .eq('inbox_id', String(body.inbox_id))
+      .neq('id', body.id)
+      .maybeSingle()
+
+    if (existing) {
+      const propName = (existing as any).properties?.name || 'homestay khác'
+      return NextResponse.json(
+        { error: `Inbox ID ${body.inbox_id} đã được gán cho Homestay "${propName}".` },
+        { status: 400 }
+      )
+    }
+  }
 
   const updateData: Record<string, unknown> = {}
   if (body.inbox_id !== undefined) updateData.inbox_id = body.inbox_id || null

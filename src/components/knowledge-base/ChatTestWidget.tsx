@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Send, Trash2, Bot, User } from 'lucide-react'
 
 interface Message {
   id: string
@@ -27,7 +28,7 @@ export function ChatTestWidget({ propertyId: propId }: ChatTestWidgetProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [resolvedPropertyId, setResolvedPropertyId] = useState(propId)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // Resolve property_id if not provided
   useEffect(() => {
@@ -49,7 +50,12 @@ export function ChatTestWidget({ propertyId: propId }: ChatTestWidgetProps) {
 
   function scrollToBottom() {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        })
+      }
     }, 100)
   }
 
@@ -124,52 +130,100 @@ export function ChatTestWidget({ propertyId: propId }: ChatTestWidgetProps) {
   }
 
   return (
-    <div className="flex flex-col h-[500px] rounded-lg border bg-background">
+    <div className="flex flex-col h-[550px] rounded-2xl border border-border/60 bg-card shadow-lg shadow-black/5 overflow-hidden transition-all duration-300 hover:shadow-xl hover:border-border/80">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b">
-        <div>
-          <h3 className="text-sm font-semibold">🤖 Test Chatbot</h3>
-          <p className="text-xs text-muted-foreground">
-            Kiểm tra chatbot với knowledge base hiện tại
-          </p>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-gradient-to-b from-muted/30 to-transparent">
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold tracking-wide flex items-center gap-1 text-foreground">
+              🤖 Test Chatbot
+            </h3>
+            <p className="text-[11px] text-muted-foreground">
+              Kiểm tra dữ liệu huấn luyện (Knowledge Base)
+            </p>
+          </div>
         </div>
-        <Button size="sm" variant="ghost" onClick={handleClear}>
-          Xóa chat
+        <Button 
+          size="sm" 
+          variant="ghost" 
+          onClick={handleClear}
+          className="h-8 px-2.5 text-muted-foreground hover:text-destructive hover:bg-destructive/5 rounded-lg transition-colors flex items-center gap-1.5"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span className="text-xs font-medium">Xóa chat</span>
         </Button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div 
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-5 py-4 space-y-4 bg-slate-50/30 dark:bg-zinc-950/10 scroll-smooth"
+      >
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in-50 duration-200`}
           >
-            <div
-              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : msg.role === 'system'
-                  ? 'bg-muted text-muted-foreground italic'
-                  : 'bg-muted'
-              }`}
-            >
-              {msg.content}
-            </div>
+            {msg.role === 'system' ? (
+              <div className="w-full flex justify-center my-1">
+                <span className="text-xs text-muted-foreground/90 bg-muted/80 px-3 py-1.5 rounded-full border border-border/30 shadow-sm">
+                  {msg.content}
+                </span>
+              </div>
+            ) : (
+              <div className={`flex gap-2.5 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                {/* Avatar */}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border shadow-sm ${
+                  msg.role === 'user'
+                    ? 'bg-primary/10 border-primary/20 text-primary'
+                    : 'bg-indigo-50 border-indigo-100 text-indigo-600 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-400'
+                }`}>
+                  {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
+
+                {/* Bubble */}
+                <div className="flex flex-col space-y-1">
+                  <div
+                    className={`rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed shadow-sm ${
+                      msg.role === 'user'
+                        ? 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-tr-none'
+                        : 'bg-card text-foreground border border-border/50 rounded-tl-none'
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
+                  <span className={`text-[10px] text-muted-foreground/70 px-1 ${
+                    msg.role === 'user' ? 'text-right' : 'text-left'
+                  }`}>
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start">
-            <div className="bg-muted rounded-lg px-3 py-2 text-sm">
-              <span className="animate-pulse">Đang trả lời...</span>
+          <div className="flex justify-start gap-2.5 max-w-[85%] animate-pulse">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border border-indigo-100 bg-indigo-50 text-indigo-600 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-400">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="flex flex-col space-y-1">
+              <div className="bg-card border border-border/50 rounded-2xl rounded-tl-none px-4 py-3 text-sm flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="w-1.5 h-1.5 bg-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span className="w-1.5 h-1.5 bg-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              </div>
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
-      <div className="px-4 py-3 border-t">
+      <div className="px-5 py-4 border-t border-border/50 bg-card">
         <div className="flex gap-2">
           <Input
             value={input}
@@ -177,10 +231,15 @@ export function ChatTestWidget({ propertyId: propId }: ChatTestWidgetProps) {
             onKeyDown={handleKeyDown}
             placeholder="Nhập câu hỏi thử..."
             disabled={loading}
-            className="flex-1"
+            className="flex-1 rounded-xl border-border/60 focus-visible:ring-indigo-500 focus-visible:ring-1"
           />
-          <Button onClick={handleSend} disabled={loading || !input.trim()}>
-            Gửi
+          <Button 
+            onClick={handleSend} 
+            disabled={loading || !input.trim()}
+            className="rounded-xl px-4 bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 flex items-center gap-1.5"
+          >
+            <span className="text-xs font-semibold">Gửi</span>
+            <Send className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>

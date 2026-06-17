@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # --- Next.js Dashboard ---
@@ -11,31 +10,14 @@ services:
     env_file:
       - .env
     restart: unless-stopped
-    depends_on:
-      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # --- n8n Workflow Automation ---
-  n8n:
-    image: n8nio/n8n:latest
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://${PUBLIC_IP:-localhost}:5678/
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-stayjoy2024}
-      - N8N_SECURE_COOKIE=false
-      # Concurrency: cho phép 20 workflow chạy song song
-      - N8N_CONCURRENCY_PRODUCTION_LIMIT=20
-      - EXECUTIONS_MODE=regular
-      - EXECUTIONS_TIMEOUT=60
-      - EXECUTIONS_TIMEOUT_MAX=120
-    volumes:
-      - n8n_data:/home/node/.n8n
-    restart: unless-stopped
+
 
   # --- Chatwoot ---
   chatwoot-web:
@@ -92,7 +74,7 @@ services:
       - chatwoot_pg_data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # --- Redis (shared by Chatwoot + n8n) ---
+  # --- Redis (used by Chatwoot) ---
   redis:
     image: redis:7-alpine
     volumes:
@@ -100,6 +82,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  n8n_data:
   chatwoot_pg_data:
   redis_data:

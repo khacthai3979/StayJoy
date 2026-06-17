@@ -114,11 +114,12 @@ export const config = {
      * - /login, /auth/* (auth routes)
      * - /onboarding (avoid redirect loop)
      * - /api/chatwoot/* (webhook from Chatwoot, no auth needed)
+     * - /api/health (monitoring endpoint, no auth needed)
      * - /api/knowledge-base (n8n API, uses X-API-Key)
      * - /api/n8n/* (n8n endpoints, uses service role)
      * - /_next/* (Next.js internals)
      * - /favicon.ico, static files
      */
-    '/((?!login|auth|onboarding|subscription-expired|privacy|terms|api/chatwoot|api/wallet/payos-webhook|api/knowledge-base|api/n8n|api/cron|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!login|auth|onboarding|subscription-expired|privacy|terms|api/chatwoot|api/health|api/wallet/payos-webhook|api/knowledge-base|api/n8n|api/cron|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

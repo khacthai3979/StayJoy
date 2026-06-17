@@ -13,8 +13,7 @@ interface Property {
   name: string
   address: string
   hotline: string
-  description: string
-  system_prompt_template: string
+  notification_email: string
 }
 
 type FormValues = Omit<Property, 'id'>
@@ -44,9 +43,15 @@ export default function SettingsPage() {
     name: '',
     address: '',
     hotline: '',
-    description: '',
-    system_prompt_template: '',
+    notification_email: '',
   })
+
+  // Password change states
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
   const [channels, setChannels] = useState<ChannelMapping[]>([])
   const [channelsLoading, setChannelsLoading] = useState(true)
   const { toast } = useToast()
@@ -63,8 +68,7 @@ export default function SettingsPage() {
         name: p.name ?? '',
         address: p.address ?? '',
         hotline: p.hotline ?? '',
-        description: p.description ?? '',
-        system_prompt_template: p.system_prompt_template ?? '',
+        notification_email: p.notification_email ?? '',
       })
     } catch {
       setError('Đã xảy ra lỗi khi tải dữ liệu. Vui lòng thử lại.')
@@ -114,8 +118,7 @@ export default function SettingsPage() {
         name: p.name ?? '',
         address: p.address ?? '',
         hotline: p.hotline ?? '',
-        description: p.description ?? '',
-        system_prompt_template: p.system_prompt_template ?? '',
+        notification_email: p.notification_email ?? '',
       })
       toast({ title: 'Đã lưu cài đặt thành công.' })
     } catch {
@@ -127,6 +130,44 @@ export default function SettingsPage() {
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handlePasswordSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      toast({ title: 'Lỗi', description: 'Vui lòng nhập đầy đủ các trường mật khẩu.', variant: 'destructive' })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      toast({ title: 'Lỗi', description: 'Mật khẩu mới và xác nhận mật khẩu không trùng khớp.', variant: 'destructive' })
+      return
+    }
+    if (newPassword.length < 6) {
+      toast({ title: 'Lỗi', description: 'Mật khẩu mới phải có ít nhất 6 ký tự.', variant: 'destructive' })
+      return
+    }
+
+    setPasswordSaving(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword, newPassword, confirmPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Đổi mật khẩu thất bại')
+      }
+      toast({ title: 'Thành công', description: 'Mật khẩu của bạn đã được thay đổi.' })
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setShowPasswordForm(false)
+    } catch (err: any) {
+      toast({ title: 'Lỗi', description: err.message || 'Lỗi hệ thống', variant: 'destructive' })
+    } finally {
+      setPasswordSaving(false)
     }
   }
 
@@ -194,27 +235,14 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">Mô tả</Label>
-            <Textarea
-              id="description"
-              value={form.description}
-              onChange={(e) => handleChange('description', e.target.value)}
+            <Label htmlFor="notification_email">Email nhận thông báo</Label>
+            <Input
+              id="notification_email"
+              type="email"
+              value={form.notification_email}
+              onChange={(e) => handleChange('notification_email', e.target.value)}
               disabled={saving}
-              placeholder="Nhập mô tả homestay"
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="system_prompt_template">System Prompt Template</Label>
-            <Textarea
-              id="system_prompt_template"
-              value={form.system_prompt_template}
-              onChange={(e) => handleChange('system_prompt_template', e.target.value)}
-              disabled={saving}
-              placeholder="Nhập system prompt template cho AI chatbot"
-              rows={6}
-              className="font-mono text-sm"
+              placeholder="Nhập email nhận thông báo (đặt phòng, yêu cầu hỗ trợ...)"
             />
           </div>
 
@@ -222,6 +250,73 @@ export default function SettingsPage() {
             {saving ? 'Đang lưu...' : 'Lưu cài đặt'}
           </Button>
         </form>
+      </section>
+
+      {/* Change Password Section */}
+      <section className="border-t pt-6">
+        <h2 className="text-lg font-semibold mb-4">Mật khẩu & Bảo mật</h2>
+        {!showPasswordForm ? (
+          <Button onClick={() => setShowPasswordForm(true)} variant="outline">
+            🔒 Thay đổi mật khẩu
+          </Button>
+        ) : (
+          <form onSubmit={handlePasswordSubmit} className="space-y-4 rounded-lg border p-4 bg-muted/20 max-w-md">
+            <div className="space-y-2">
+              <Label htmlFor="oldPassword">Mật khẩu cũ</Label>
+              <Input
+                id="oldPassword"
+                type="password"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                disabled={passwordSaving}
+                placeholder="Nhập mật khẩu hiện tại"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="newPassword">Mật khẩu mới</Label>
+              <Input
+                id="newPassword"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                disabled={passwordSaving}
+                placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Xác nhận mật khẩu mới</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={passwordSaving}
+                placeholder="Nhập lại mật khẩu mới"
+                required
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button type="submit" disabled={passwordSaving}>
+                {passwordSaving ? 'Đang lưu...' : 'Lưu mật khẩu mới'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setShowPasswordForm(false)
+                  setOldPassword('')
+                  setNewPassword('')
+                  setConfirmPassword('')
+                }}
+                disabled={passwordSaving}
+              >
+                Hủy
+              </Button>
+            </div>
+          </form>
+        )}
       </section>
 
       {/* Connected Channels */}
