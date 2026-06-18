@@ -301,11 +301,15 @@ export async function POST(request: NextRequest) {
       // Để tránh tình trạng 10 tin nhắn đầu vẫn bị gửi đi cho AI sau khi hết 30s
       cancelPending(String(conversationId))
 
-      await replyToChatwoot(
-        accountId,
-        conversationId,
-        '⚠️ Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
-      )
+      // Chỉ gửi thông báo cảnh báo 1 lần duy nhất trong vòng 1 phút
+      // Các tin nhắn spam tiếp theo sẽ bị từ chối trong im lặng
+      if (rateLimit.shouldWarn) {
+        await replyToChatwoot(
+          accountId,
+          conversationId,
+          '⚠️ Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
+        )
+      }
       return NextResponse.json({ status: 'ignored', reason: 'rate_limited' })
     }
 

@@ -5,6 +5,7 @@
 
 interface RateLimitHistory {
   timestamps: number[]
+  lastWarningAt?: number
 }
 
 const rateLimitMinute = new Map<string, RateLimitHistory>()
@@ -18,7 +19,7 @@ const MAX_MSG_PER_HOUR = 60
  * 
  * @param conversationId - The unique ID of the Chatwoot conversation.
  */
-export function checkRateLimit(conversationId: string): { isLimited: boolean; reason?: string } {
+export function checkRateLimit(conversationId: string): { isLimited: boolean; shouldWarn: boolean; reason?: string } {
   const now = Date.now()
   const oneMinuteAgo = now - 60 * 1000
   const oneHourAgo = now - 60 * 60 * 1000
@@ -31,7 +32,12 @@ export function checkRateLimit(conversationId: string): { isLimited: boolean; re
   }
   minHistory.timestamps = minHistory.timestamps.filter((t) => t > oneMinuteAgo)
   if (minHistory.timestamps.length >= MAX_MSG_PER_MINUTE) {
-    return { isLimited: true, reason: 'minute_limit' }
+    let shouldWarn = false
+    if (!minHistory.lastWarningAt || (now - minHistory.lastWarningAt > 60 * 1000)) {
+      shouldWarn = true
+      minHistory.lastWarningAt = now
+    }
+    return { isLimited: true, shouldWarn, reason: 'minute_limit' }
   }
 
   // 2. Hour check
@@ -42,14 +48,19 @@ export function checkRateLimit(conversationId: string): { isLimited: boolean; re
   }
   hrHistory.timestamps = hrHistory.timestamps.filter((t) => t > oneHourAgo)
   if (hrHistory.timestamps.length >= MAX_MSG_PER_HOUR) {
-    return { isLimited: true, reason: 'hour_limit' }
+    let shouldWarn = false
+    if (!hrHistory.lastWarningAt || (now - hrHistory.lastWarningAt > 60 * 60 * 1000)) {
+      shouldWarn = true
+      hrHistory.lastWarningAt = now
+    }
+    return { isLimited: true, shouldWarn, reason: 'hour_limit' }
   }
 
   // Record timestamp if not limited
   minHistory.timestamps.push(now)
   hrHistory.timestamps.push(now)
 
-  return { isLimited: false }
+  return { isLimited: false, shouldWarn: false }
 }
 
 // Precise vulgar words list used with space-padded matching to avoid substring matches.
