@@ -94,5 +94,7 @@ export function cancelPending(conversationId: string): void {
   if (entry) {
     clearTimeout(entry.timer)
     pending.delete(conversationId)
+    // Resolve with an empty string so waiting promises exit safely
+    entry.resolve('')
   }
 }

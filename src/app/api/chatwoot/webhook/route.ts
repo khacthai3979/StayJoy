@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { buildSystemMessage, KnowledgeSection, Room } from '@/lib/knowledge-base/builder'
 import { callLLM } from '@/lib/llm/provider'
-import { debounceMessage } from '@/lib/message-debounce'
+import { debounceMessage, cancelPending } from '@/lib/message-debounce'
 import { sendEmail } from '@/lib/email'
 import { checkRateLimit, checkInappropriateLanguage, checkJailbreak } from '@/lib/chatbot/moderation'
 import { checkWebhookRateLimit } from '@/lib/chatbot/webhook-rate-limit'
@@ -296,10 +296,15 @@ export async function POST(request: NextRequest) {
     const rateLimit = checkRateLimit(String(conversationId))
     if (rateLimit.isLimited) {
       logger.warn('Conversation rate limited', { conversationId })
+
+      // HỦY BỎ NGAY LẬP TỨC các tin nhắn đang chờ trong hàng đợi Debounce của người này
+      // Để tránh tình trạng 10 tin nhắn đầu vẫn bị gửi đi cho AI sau khi hết 30s
+      cancelPending(String(conversationId))
+
       await replyToChatwoot(
         accountId,
         conversationId,
-        '⚠️ Hệ thống nhận thấy bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
+        '⚠️ Bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
       )
       return NextResponse.json({ status: 'ignored', reason: 'rate_limited' })
     }
@@ -316,6 +321,12 @@ export async function POST(request: NextRequest) {
 
     // Chờ debounce hoàn tất (30s sau tin nhắn cuối cùng)
     const combinedContent = await debouncedMessage
+
+    // Nếu hàng đợi bị xoá (vd: do Rate limit chặn ngang và gọi cancelPending)
+    // thì combinedContent sẽ là chuỗi rỗng -> kết thúc request an toàn không gọi AI
+    if (!combinedContent) {
+      return NextResponse.json({ status: 'ignored', reason: 'debounce_cancelled_due_to_spam' })
+    }
 
     // --- LỚP 2: Chặn ngôn từ tục tĩu/không chuẩn mực ---
     if (checkInappropriateLanguage(combinedContent)) {
