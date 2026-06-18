@@ -291,6 +291,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'ignored', reason: 'missing ids' })
     }
 
+    // --- LỚP 1: Chống spam tần suất gửi (Rate Limiter) ---
+    // Gọi TRƯỚC khi debounce để bắt chính xác từng request gửi tới (chặn spam)
+    const rateLimit = checkRateLimit(String(conversationId))
+    if (rateLimit.isLimited) {
+      logger.warn('Conversation rate limited', { conversationId })
+      await replyToChatwoot(
+        accountId,
+        conversationId,
+        '⚠️ Hệ thống nhận thấy bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
+      )
+      return NextResponse.json({ status: 'ignored', reason: 'rate_limited' })
+    }
+
     // Debounce: gom nhiều tin nhắn liên tiếp từ cùng conversation trong vòng 30 giây
     const debouncedMessage = debounceMessage(String(conversationId), content)
 
@@ -303,18 +316,6 @@ export async function POST(request: NextRequest) {
 
     // Chờ debounce hoàn tất (30s sau tin nhắn cuối cùng)
     const combinedContent = await debouncedMessage
-
-    // --- LỚP 1: Chống spam tần suất gửi (Rate Limiter) ---
-    const rateLimit = checkRateLimit(String(conversationId))
-    if (rateLimit.isLimited) {
-      logger.warn('Conversation rate limited', { conversationId })
-      await replyToChatwoot(
-        accountId,
-        conversationId,
-        '⚠️ Hệ thống nhận thấy bạn đang gửi tin nhắn quá nhanh. Vui lòng đợi 1 phút trước khi tiếp tục gửi câu hỏi.'
-      )
-      return NextResponse.json({ status: 'ignored', reason: 'rate_limited' })
-    }
 
     // --- LỚP 2: Chặn ngôn từ tục tĩu/không chuẩn mực ---
     if (checkInappropriateLanguage(combinedContent)) {
