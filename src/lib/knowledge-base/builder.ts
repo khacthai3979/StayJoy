@@ -135,7 +135,8 @@ export function buildSystemMessage(
   sections: KnowledgeSection[],
   rooms: Room[],
   plan?: string,
-  currentDate?: string
+  currentDate?: string,
+  bookedDatesStr?: string
 ): string {
   // Return '' when there are no active sections and no rooms
   const activeSections = sections.filter((s) => s.is_active)
@@ -190,7 +191,7 @@ export function buildSystemMessage(
   const knowledgeContent = contentParts.join('\n\n---\n\n')
 
   // --- Build full system message with instructions ---
-  const systemInstruction = buildSystemInstruction(currentDate)
+  const systemInstruction = buildSystemInstruction(currentDate, bookedDatesStr)
   const behaviorGuidelines = buildBehaviorGuidelines(plan)
 
   const finalParts: string[] = []
@@ -205,15 +206,20 @@ export function buildSystemMessage(
 // System instruction (personality & tone)
 // ---------------------------------------------------------------------------
 
-function buildSystemInstruction(currentDate?: string): string {
+function buildSystemInstruction(currentDate?: string, bookedDatesStr?: string): string {
   const dateInstruction = currentDate ? `\n\nTHỜI GIAN HIỆN TẠI: ${currentDate}. Dùng mốc này để phân biệt ngày quá khứ/tương lai.` : ''
-  return `Bạn là lễ tân ảo của homestay.${dateInstruction}
+  const bookingInstruction = bookedDatesStr ? `\n\nTRẠNG THÁI LỊCH PHÒNG (Các ngày ĐÃ BỊ ĐẶT trong 3 tháng tới):\n${bookedDatesStr}\n⚠️ LƯU Ý QUAN TRỌNG: Chỉ dùng thông tin này để đối chiếu ngầm khi khách hỏi ngày cụ thể hoặc muốn đặt phòng. KHÔNG tự ý liệt kê toàn bộ ngày trống/đã đặt cho khách. BẮT BUỘC xin lỗi khách và gợi ý ngày khác nếu họ muốn đặt vào ngày đã bị đặt trong danh sách trên.` : ''
+  return `Bạn là lễ tân ảo của homestay.${dateInstruction}${bookingInstruction}
 
 NGÔN NGỮ:
-- Tự động nhận diện ngôn ngữ khách dùng (Tiếng Việt hoặc English) và trả lời bằng ngôn ngữ đó.
+- BẮT BUỘC tự động nhận diện ngôn ngữ khách dùng và trả lời bằng CHÍNH ngôn ngữ đó.
+- Hỗ trợ TẤT CẢ ngôn ngữ phổ biến: Việt, Anh, Hàn, Nhật, Trung, Thái, Pháp, Đức, Tây Ban Nha, v.v.
 - Tiếng Việt: Xưng "em", gọi khách "anh/chị".
 - English: Use friendly, professional tone ("Hi!", "Sure!", "Let me help you").
-- Dữ liệu trong tag [BOOKING_REQUEST], [OWNER_REQUEST], [SHOW_IMAGES] luôn giữ nguyên tiếng Việt bất kể ngôn ngữ hội thoại.
+- 한국어: 존댓말(Jondaemal) 사용, 친절하고 정중한 어조.
+- 日本語: 丁寧語(Teineigo)を使い、ホスピタリティを意識した対応.
+- Các ngôn ngữ khác: Dùng văn phong lịch sự, kính ngữ phù hợp văn hóa bản địa.
+- ⚠️ QUAN TRỌNG: Dữ liệu trong tag [BOOKING_REQUEST], [OWNER_REQUEST], [SHOW_IMAGES] LUÔN viết bằng tiếng Việt bất kể ngôn ngữ hội thoại, vì chủ nhà là người Việt.
 
 TÍNH CÁCH:
 - Thân thiện, nhiệt tình, tự nhiên — không robot

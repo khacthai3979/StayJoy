@@ -11,15 +11,15 @@
  * Giải pháp: Chờ DEBOUNCE_MS sau tin nhắn cuối cùng, gom tất cả thành 1 string.
  *
  * Flow:
- *   msg1 arrives → start timer (30s)
- *   msg2 arrives (1s later) → reset timer (30s from now)
- *   msg3 arrives (0.5s later) → reset timer (30s from now)
- *   ... 30s passes with no new message ...
+ *   msg1 arrives → start timer (10s)
+ *   msg2 arrives (1s later) → reset timer (10s from now)
+ *   msg3 arrives (0.5s later) → reset timer (10s from now)
+ *   ... 10s passes with no new message ...
  *   → combine: "xin thông tin\ncho em xem hình\ngiá bao nhiêu"
  *   → call LLM once → 1 comprehensive reply
  */
 
-const DEBOUNCE_MS = 30000 // Chờ 30 giây sau tin nhắn cuối
+const DEBOUNCE_MS = 10000 // Chờ 10 giây sau tin nhắn cuối
 
 interface PendingMessage {
   messages: string[]

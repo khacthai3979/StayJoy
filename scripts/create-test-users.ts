@@ -37,12 +37,12 @@ async function main() {
   // Reset password for all users to "Test1234!"
   for (const u of users.users) {
     const { error } = await supabase.auth.admin.updateUserById(u.id, {
-      password: 'Test1234!'
+      password: '1234567890-='
     })
     if (error) {
       console.error(`  ✗ Failed to reset ${u.email}:`, error.message)
     } else {
-      console.log(`  ✓ ${u.email} → password: Test1234!`)
+      console.log(`  ✓ ${u.email} → password: 1234567890-=`)
     }
   }
 

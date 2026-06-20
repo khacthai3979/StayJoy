@@ -515,8 +515,38 @@ export async function POST(request: NextRequest) {
     const dayOfWeek = daysOfWeek[now.getDay()]
     const currentDateStr = `${dayOfWeek}, ngày ${day}/${month}/${year}`
 
+    // Fetch bookings in the next 90 days for availability checking
+    const ninetyDaysFromNow = new Date(now)
+    ninetyDaysFromNow.setDate(ninetyDaysFromNow.getDate() + 90)
+    
+    const todayStrRaw = now.toISOString().split('T')[0]
+    const ninetyDaysStr = ninetyDaysFromNow.toISOString().split('T')[0]
+
+    const bookingsResult = await supabase
+      .from('bookings')
+      .select('phong, check_in, check_out, tinh_trang')
+      .eq('property_id', propertyId)
+      .in('tinh_trang', ['confirmed', 'paid', 'checked_in'])
+      .gte('check_out', todayStrRaw)
+      .lte('check_in', ninetyDaysStr)
+
+    let bookedDatesStr = ''
+    if (bookingsResult.data && bookingsResult.data.length > 0) {
+      const bookedByRoom: Record<string, string[]> = {}
+      for (const b of bookingsResult.data) {
+        if (!b.phong) continue
+        if (!bookedByRoom[b.phong]) bookedByRoom[b.phong] = []
+        bookedByRoom[b.phong].push(`${b.check_in} -> ${b.check_out}`)
+      }
+      
+      const lines = Object.entries(bookedByRoom).map(([roomId, dates]) => {
+        return `- Phòng ${roomId}: Đã có khách đặt các khoảng thời gian: ${dates.join(', ')}`
+      })
+      bookedDatesStr = lines.join('\n')
+    }
+
     // Build system message
-    let systemMessage = buildSystemMessage(sections, rooms, plan, currentDateStr)
+    let systemMessage = buildSystemMessage(sections, rooms, plan, currentDateStr, bookedDatesStr)
 
     // Fetch and append conversation history for context
     const history = await getConversationHistory(accountId, conversationId)
@@ -687,6 +717,19 @@ export async function POST(request: NextRequest) {
         const emailSubject = `[StayJoy] Khách hàng yêu cầu hỗ trợ trực tiếp`
         const emailText = `🔔 KHÁCH HÀNG CẦN HỖ TRỢ:\n\n💬 Nội dung: ${reason}\n\nVui lòng truy cập Chatwoot để xem chi tiết hội thoại.`
         await sendEmail(ownerEmail, emailSubject, emailText)
+      }
+
+      // Log unhandled question for AI feedback loop
+      const { error: insertError } = await supabase.from('unhandled_questions').insert({
+        property_id: propertyId,
+        conversation_id: String(conversationId),
+        customer_message: combinedContent,
+        ai_reason: reason,
+        status: 'new'
+      })
+      
+      if (insertError) {
+        logger.error('Failed to log unhandled question', { error: insertError })
       }
     }
 

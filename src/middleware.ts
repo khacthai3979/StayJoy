@@ -101,6 +101,25 @@ export async function middleware(request: NextRequest) {
       }
     }
 
+    // Requirement RBAC: Staff không được truy cập các trang nhạy cảm
+    if (role === 'staff') {
+      const restrictedPaths = [
+        '/dashboard/knowledge-base',
+        '/dashboard/ai-feedbacks',
+        '/dashboard/usage',
+        '/dashboard/billing',
+        '/dashboard/settings',
+        '/dashboard/revenue',
+        '/dashboard/staff',
+      ]
+      const isRestricted = restrictedPaths.some((p) => pathname.startsWith(p))
+      if (isRestricted) {
+        const dashboardUrl = request.nextUrl.clone()
+        dashboardUrl.pathname = '/dashboard'
+        return NextResponse.redirect(dashboardUrl)
+      }
+    }
+
     return supabaseResponse
   }
 

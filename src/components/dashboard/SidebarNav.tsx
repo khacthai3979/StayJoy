@@ -2,25 +2,54 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bot, Cpu, CreditCard, LogOut, TableOfContents, ClipboardList, Building, MessageCircle, Settings, type LucideIcon } from 'lucide-react'
+import { Bot, Cpu, CreditCard, LogOut, TableOfContents, ClipboardList, Building, MessageCircle, Settings, CalendarCheck2, Sparkles, Users, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState } from 'react'
 
-const navItems: { href: string; label: string; icon?: LucideIcon }[] = [
+interface NavItem {
+  href: string
+  label: string
+  icon?: LucideIcon
+  ownerOnly?: boolean
+}
+
+const navItems: NavItem[] = [
   { href: '/dashboard', label: 'Tổng Quan', icon: TableOfContents },
-  // { href: '/dashboard/calendar', label: 'Lịch Phòng', icon: CalendarCheck2 }, // Tạm ẩn — sẽ mở lại khi có tính năng mở rộng
+  { href: '/dashboard/calendar', label: 'Lịch Đặt Phòng', icon: CalendarCheck2 },
   { href: '/dashboard/bookings', label: 'Yêu Cầu Đặt Phòng', icon: ClipboardList },
   { href: '/dashboard/rooms', label: 'Quản Lý Phòng', icon: Building },
   { href: '/dashboard/conversations', label: 'Hội Thoại', icon: MessageCircle },
-  { href: '/dashboard/knowledge-base', label: 'Knowledge Base', icon: Bot },
-  { href: '/dashboard/usage', label: 'Sử Dụng AI', icon: Cpu },
-  { href: '/dashboard/billing', label: 'Ví & Thanh Toán', icon: CreditCard },
-  { href: '/dashboard/settings', label: 'Cài Đặt Homestay', icon: Settings },
+  { href: '/dashboard/knowledge-base', label: 'Knowledge Base', icon: Bot, ownerOnly: true },
+  { href: '/dashboard/ai-feedbacks', label: 'Cải Thiện Chatbot', icon: Sparkles, ownerOnly: true },
+  { href: '/dashboard/usage', label: 'Sử Dụng AI', icon: Cpu, ownerOnly: true },
+  { href: '/dashboard/billing', label: 'Ví & Thanh Toán', icon: CreditCard, ownerOnly: true },
+  { href: '/dashboard/staff', label: 'Quản Lý Nhân Viên', icon: Users, ownerOnly: true },
+  { href: '/dashboard/settings', label: 'Cài Đặt Homestay', icon: Settings, ownerOnly: true },
 ]
 
 export function SidebarNav() {
   const pathname = usePathname()
   const router = useRouter()
+  const [userRole, setUserRole] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function fetchRole() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase
+        .from('users_properties')
+        .select('role')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+
+      if (data) setUserRole(data.role)
+    }
+    fetchRole()
+  }, [])
 
   async function handleLogout() {
     const supabase = createClient()
@@ -28,9 +57,15 @@ export function SidebarNav() {
     router.push('/login')
   }
 
+  // Lọc menu: Staff chỉ thấy các tab không bị đánh dấu ownerOnly
+  const visibleItems = navItems.filter((item) => {
+    if (item.ownerOnly && userRole === 'staff') return false
+    return true
+  })
+
   return (
     <nav className="flex flex-col gap-1 px-3 py-4 flex-1">
-      {navItems.map(({ href, label, icon: Icon }) => {
+      {visibleItems.map(({ href, label, icon: Icon }) => {
         const isActive =
           href === '/dashboard' ? pathname === href : pathname.startsWith(href)
 
