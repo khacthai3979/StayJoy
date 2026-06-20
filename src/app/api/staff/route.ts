@@ -31,7 +31,7 @@ async function verifyOwner(supabase: ReturnType<typeof createClient>) {
     .from('users_properties')
     .select('property_id, role')
     .eq('user_id', user.id)
-    .eq('role', 'owner')
+    .in('role', ['owner', 'admin'])
     .limit(1)
     .single()
 

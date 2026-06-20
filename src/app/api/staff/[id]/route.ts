@@ -19,7 +19,7 @@ async function verifyOwnerAndStaff(staffUserId: string) {
     .from('users_properties')
     .select('property_id')
     .eq('user_id', user.id)
-    .eq('role', 'owner')
+    .in('role', ['owner', 'admin'])
     .limit(1)
     .single()
 
