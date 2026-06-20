@@ -14,8 +14,8 @@ import os from 'os'
  *
  * Returns:
  *   - 200 with "healthy"  → all checks pass
- *   - 503 with "degraded" → non-critical checks fail or CPU load > 85% (503 triggers Better Stack Free alert)
- *   - 503 with "unhealthy" → critical checks (DB down) fail or RAM usage > 85%
+ *   - 503 with "degraded" → non-critical checks fail or CPU load > 95% (503 triggers Better Stack Free alert)
+ *   - 503 with "unhealthy" → critical checks (DB down) fail or RAM usage > 95%
  *
  * Security:
  *   - Without `X-Health-Secret` header → minimal response (status + timestamp only)
@@ -149,19 +149,19 @@ export async function GET(request: NextRequest) {
   const dbDown = checks.database?.status === 'down'
   const chatwootDown = checks.chatwoot?.status === 'down'
   
-  // Resource status checks (Threshold configured at 85%)
-  const isMemoryCritical = system ? system.memoryUsagePercent > 85 : false
-  const isCpuCritical = system ? system.cpuUsagePercent > 85 : false
+  // Resource status checks (Threshold configured at 95%)
+  const isMemoryCritical = system ? system.memoryUsagePercent > 95 : false
+  const isCpuCritical = system ? system.cpuUsagePercent > 95 : false
 
   let overallStatus: 'healthy' | 'degraded' | 'unhealthy'
   let httpStatus: number
 
   if (dbDown || isMemoryCritical) {
-    // Database down or RAM usage > 85% is critical (HTTP 503)
+    // Database down or RAM usage > 95% is critical (HTTP 503)
     overallStatus = 'unhealthy'
     httpStatus = 503
   } else if (chatwootDown || isCpuCritical) {
-    // Chatwoot down or CPU load > 85% is warning/degraded
+    // Chatwoot down or CPU load > 95% is warning/degraded
     // Forced to HTTP 503 so Better Stack Free Tier triggers an alert
     overallStatus = 'degraded'
     httpStatus = 503
