@@ -16,7 +16,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: '/dashboard', label: 'Tổng Quan', icon: TableOfContents },
-  { href: '/dashboard/calendar', label: 'Lịch Đặt Phòng', icon: CalendarCheck2 },
   { href: '/dashboard/bookings', label: 'Yêu Cầu Đặt Phòng', icon: ClipboardList },
   { href: '/dashboard/rooms', label: 'Quản Lý Phòng', icon: Building },
   { href: '/dashboard/conversations', label: 'Hội Thoại', icon: MessageCircle },
