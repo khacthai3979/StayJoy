@@ -51,8 +51,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Chỉ Owner mới có quyền xem danh sách nhân viên' }, { status: 403 })
   }
 
-  // Lấy tất cả staff thuộc cùng property
-  const { data: staffList, error } = await supabase
+  // Lấy tất cả staff thuộc cùng property bằng Admin client (Bypass RLS của users_properties)
+  const supabaseAdmin = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data: staffList, error } = await supabaseAdmin
     .from('users_properties')
     .select('id, user_id, role, permissions, created_at')
     .eq('property_id', ownerInfo.propertyId)
@@ -62,12 +67,6 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-
-  // Dùng admin client để lấy email từ auth.users (vì anon key không truy cập được auth schema)
-  const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
 
   // Lấy email cho từng staff
   const staffWithEmail = await Promise.all(

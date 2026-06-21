@@ -35,7 +35,7 @@ export default function AiFeedbacksPage() {
       if (!userData.user) return
 
       const { data: properties } = await supabase
-        .from('user_properties')
+        .from('users_properties')
         .select('property_id')
         .eq('user_id', userData.user.id)
       
