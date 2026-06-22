@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     const baseUrl = `${protocol}://${host}`
 
     const returnUrl = `${baseUrl}/dashboard/billing?status=success&orderCode=${orderCode}`
-    const cancelUrl = `${baseUrl}/dashboard/billing?status=cancelled`
+    const cancelUrl = `${baseUrl}/dashboard/billing?status=cancelled&orderCode=${orderCode}`
 
     // 3. Create PayOS Payment link
     const payosResponse = await createPayOSPaymentLink({
@@ -155,5 +155,36 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[POST /api/wallet]', error)
     return NextResponse.json({ error: 'Failed to create payment link' }, { status: 500 })
+  }
+}
+
+// PATCH /api/wallet — handle frontend cancellation of a pending transaction
+export async function PATCH(request: NextRequest) {
+  const supabase = createClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const body = await request.json()
+    const { orderCode, status } = body
+
+    if (!orderCode || status !== 'failed') {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
+    }
+
+    const { error: txError } = await supabase
+      .from('wallet_transactions')
+      .update({ status: 'failed' })
+      .eq('payos_order_code', orderCode)
+      .eq('status', 'pending') // Only cancel if it's pending
+
+    if (txError) throw txError
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[PATCH /api/wallet]', error)
+    return NextResponse.json({ error: 'Failed to update transaction' }, { status: 500 })
   }
 }

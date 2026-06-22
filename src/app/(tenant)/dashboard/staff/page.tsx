@@ -30,17 +30,16 @@ interface StaffMember {
   created_at: string
 }
 
-const PERMISSION_LABELS: Record<keyof StaffPermissions, string> = {
-  can_view_bookings: 'Xem đặt phòng',
-  can_view_conversations: 'Xem hội thoại',
-  can_view_calendar: 'Xem lịch phòng',
-  can_edit_rooms: 'Sửa thông tin phòng',
-  can_edit_knowledge: 'Sửa Knowledge Base',
-  can_view_revenue: 'Xem doanh thu',
-  can_view_usage: 'Xem sử dụng AI',
-  can_edit_settings: 'Sửa cài đặt',
-  can_manage_billing: 'Quản lý thanh toán',
-}
+const PERMISSIONS_UI: { key: keyof StaffPermissions, label: string }[] = [
+  { key: 'can_view_bookings', label: 'Xem đặt phòng' },
+  { key: 'can_view_conversations', label: 'Xem hội thoại' },
+  { key: 'can_edit_rooms', label: 'Sửa thông tin phòng' },
+  { key: 'can_edit_knowledge', label: 'Sửa Knowledge Base' },
+  { key: 'can_view_revenue', label: 'Xem doanh thu' },
+  { key: 'can_view_usage', label: 'Xem sử dụng AI' },
+  { key: 'can_edit_settings', label: 'Sửa cài đặt' },
+  { key: 'can_manage_billing', label: 'Xem ví & thanh toán' },
+]
 
 const DEFAULT_PERMISSIONS: StaffPermissions = {
   can_view_bookings: true,
@@ -222,7 +221,7 @@ export default function StaffPage() {
           <div className="space-y-2">
             <Label>Quyền hạn ban đầu</Label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {(Object.keys(PERMISSION_LABELS) as (keyof StaffPermissions)[]).map((key) => (
+              {PERMISSIONS_UI.map(({ key, label }) => (
                 <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -230,7 +229,7 @@ export default function StaffPage() {
                     onChange={() => setNewPermissions((prev) => ({ ...prev, [key]: !prev[key] }))}
                     className="rounded"
                   />
-                  {PERMISSION_LABELS[key]}
+                  {label}
                 </label>
               ))}
             </div>
@@ -279,7 +278,7 @@ export default function StaffPage() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {(Object.keys(PERMISSION_LABELS) as (keyof StaffPermissions)[]).map((key) => (
+                {PERMISSIONS_UI.map(({ key, label }) => (
                   <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                     <input
                       type="checkbox"
@@ -288,7 +287,7 @@ export default function StaffPage() {
                       disabled={savingId === staff.id}
                       className="rounded"
                     />
-                    {PERMISSION_LABELS[key]}
+                    {label}
                   </label>
                 ))}
               </div>

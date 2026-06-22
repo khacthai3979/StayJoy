@@ -85,6 +85,14 @@ export default function BillingPage() {
       })
       fetchBillingData()
     } else if (status === 'cancelled') {
+      const orderCode = searchParams.get('orderCode')
+      if (orderCode) {
+        fetch('/api/wallet', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderCode: Number(orderCode), status: 'failed' })
+        }).then(() => fetchBillingData())
+      }
       toast({
         title: 'Giao dịch bị hủy',
         description: 'Bạn đã hủy quy trình nạp tiền qua PayOS.',
